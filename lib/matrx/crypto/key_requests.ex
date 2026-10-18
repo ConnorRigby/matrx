@@ -66,7 +66,15 @@ defmodule Matrx.Crypto.KeyRequests do
   key (`m.forwarded_room_key`). Only devices signed by our own cross-signing
   keys are answered, and only for keys we hold for that room and sender.
   """
-  @spec answer(Session.t(), %{sender: String.t(), content: term()}, keyword()) ::
+  @spec answer(
+          Session.t(),
+          %{
+            required(:sender) => String.t(),
+            required(:content) => term(),
+            optional(atom()) => term()
+          },
+          keyword()
+        ) ::
           :ok | {:error, term()}
   def answer(session, event, opts \\ [])
 

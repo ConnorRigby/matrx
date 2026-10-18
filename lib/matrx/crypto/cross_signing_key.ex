@@ -5,10 +5,10 @@ defmodule Matrx.Crypto.CrossSigningKey do
   @derive {Inspect, except: [:seed]}
   @primary_key false
   schema "cross_signing_keys" do
-    field(:session_id, :binary_id, primary_key: true)
-    field(:usage, :string, primary_key: true)
-    field(:public, :string)
-    field(:seed, :binary)
+    belongs_to :session, Matrx.Session, type: :binary_id, primary_key: true
+    field :usage, :string, primary_key: true
+    field :public, :string
+    field :seed, :binary
     timestamps()
   end
 end

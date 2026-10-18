@@ -86,7 +86,15 @@ defmodule Matrx.Crypto.OlmMessages do
   Decrypt a to-device `m.room.encrypted` event and check it really came from
   the device it claims to. Returns the decrypted event.
   """
-  @spec decrypt(Session.t(), %{sender: String.t(), content: term()}, keyword()) ::
+  @spec decrypt(
+          Session.t(),
+          %{
+            required(:sender) => String.t(),
+            required(:content) => term(),
+            optional(atom()) => term()
+          },
+          keyword()
+        ) ::
           {:ok,
            %{type: String.t(), content: map(), sender: String.t(), sender_device: Device.t()}}
           | {:error, term()}

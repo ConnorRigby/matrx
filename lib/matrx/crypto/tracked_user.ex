@@ -5,9 +5,9 @@ defmodule Matrx.Crypto.TrackedUser do
 
   @primary_key false
   schema "tracked_users" do
-    field(:session_id, :binary_id, primary_key: true)
-    field(:user_id, :string, primary_key: true)
-    field(:outdated, :boolean, default: true)
+    belongs_to :session, Matrx.Session, type: :binary_id, primary_key: true
+    field :user_id, :string, primary_key: true
+    field :outdated, :boolean, default: true
     timestamps()
   end
 end

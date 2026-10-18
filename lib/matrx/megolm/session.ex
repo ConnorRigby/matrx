@@ -2,10 +2,12 @@ defmodule Matrx.Megolm.Session do
   @moduledoc """
   Helper macro module to represent inbound and outbound session.
 
-  Options: `:table`; `counted: true` for outbound sessions, which keep the
-  number of messages they encrypted so they can be rotated; and `inbound: true`,
-  which makes the key an `id` so that every logged in device can hold a copy of
-  the same session (outbound sessions are only ever created by us).
+  Options:
+    * `:table`;
+    * `counted: true` for outbound sessions, which keep the
+      number of messages they encrypted so they can be rotated; and `inbound: true`,
+      which makes the key an `id` so that every logged in device can hold a copy of
+      the same session (outbound sessions are only ever created by us).
   """
 
   defmacro __using__(opts) do
@@ -19,21 +21,26 @@ defmodule Matrx.Megolm.Session do
 
       @derive {Inspect, [except: [:pickle, :pickle_data]]}
 
+      @type t :: %__MODULE__{}
+
       @primary_key if unquote(inbound?),
                      do: {:id, :binary_id, autogenerate: true},
                      else: {:session_id, :string, []}
       schema unquote(table) do
         if unquote(inbound?), do: field(:session_id, :string)
-        field(:session, :map, virtual: true)
-        field(:session_key, :string)
-        field(:owner_id, :binary_id)
-        field(:room_id, :string)
-        field(:sender_key, :string)
+        field :session, :map, virtual: true
+        field :session_key, :string
+        belongs_to :owner, Matrx.Session, type: :binary_id
+        field :room_id, :string
+        field :sender_key, :string
 
         if unquote(counted?), do: field(:message_count, :integer, default: 0)
 
-        field(:pickle, :binary)
-        field(:pickle_data, :map, source: :pickle)
+        if unquote(!inbound?),
+          do: has_many(:shares, Matrx.Megolm.Share, foreign_key: :session_id)
+
+        field :pickle, :binary
+        field :pickle_data, :map, source: :pickle
         timestamps()
       end
 

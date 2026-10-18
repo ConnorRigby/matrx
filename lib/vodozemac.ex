@@ -24,19 +24,19 @@ defmodule Vodozemac do
   @spec generate_one_time_keys(account(), pos_integer()) :: one_time_keys()
   def generate_one_time_keys(_res, _count), do: :erlang.nif_error(:nif_not_loaded)
 
-  @spec one_time_keys(account()) :: [one_time_key()]
+  @spec one_time_keys(account()) :: %{String.t() => one_time_key()}
   def one_time_keys(_account), do: :erlang.nif_error(:nif_not_loaded)
 
   @spec mark_keys_as_published(account()) :: :ok
   def mark_keys_as_published(_res), do: :erlang.nif_error(:nif_not_loaded)
 
-  @spec sign(String.t(), String.t()) :: String.t()
+  @spec sign(account(), binary()) :: String.t()
   def sign(_res, _message), do: :erlang.nif_error(:nif_not_loaded)
 
   @spec pickle(account()) :: String.t()
   def pickle(_res), do: :erlang.nif_error(:nif_not_loaded)
 
-  @spec unpickle(account()) :: String.t()
+  @spec unpickle(String.t()) :: account()
   def unpickle(_pickle), do: :erlang.nif_error(:nif_not_loaded)
 
   ## OLM

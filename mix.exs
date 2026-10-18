@@ -31,7 +31,7 @@ defmodule Matrx.MixProject do
       {:ed25519, "~> 1.5"},
       {:ecto_sqlite3, "~> 0.17"},
       {:phoenix_pubsub, "~> 2.2"},
-      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]
   end
 

@@ -40,11 +40,19 @@ defmodule Matrx.Session do
   @derive {Inspect, except: [:access_token]}
   @primary_key {:id, :binary_id, autogenerate: true}
   schema "sessions" do
-    field(:home_server_uri, URIType)
-    field(:user_id, :string)
-    field(:device_id, :string)
-    field(:access_token, :string)
-    belongs_to(:account, Account, type: :binary_id)
+    field :home_server_uri, URIType
+    field :user_id, :string
+    field :device_id, :string
+    field :access_token, :string
+    belongs_to :account, Account, type: :binary_id
+    has_many :devices, Matrx.Crypto.Device
+    has_many :tracked_users, Matrx.Crypto.TrackedUser
+    has_many :cross_signing_keys, Matrx.Crypto.CrossSigningKey
+    has_many :olm_inbound_sessions, Matrx.Olm.InboundSession, foreign_key: :owner_id
+    has_many :olm_outbound_sessions, Matrx.Olm.OutboundSession, foreign_key: :owner_id
+    has_many :megolm_inbound_sessions, Matrx.Megolm.InboundSession, foreign_key: :owner_id
+    has_many :megolm_outbound_sessions, Matrx.Megolm.OutboundSession, foreign_key: :owner_id
+    has_many :megolm_key_requests, Matrx.Megolm.KeyRequest, foreign_key: :owner_id
     timestamps()
   end
 

@@ -18,7 +18,7 @@ defmodule Matrx.Crypto.RoomEncryption do
   alias Matrx.{Megolm, Olm, Repo, Room, Session}
 
   @default_rotation_msgs 100
-  @default_rotation_ms 7 * 24 * 60 * 60 * 1000
+  @default_rotation_ms :timer.hours(24) * 7
 
   @doc """
   Encrypt and send an event to a room.

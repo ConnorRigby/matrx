@@ -4,10 +4,10 @@ defmodule Matrx.Megolm.MessageIndex do
 
   @primary_key false
   schema "megolm_message_indexes" do
-    field(:session_id, :string, primary_key: true)
-    field(:message_index, :integer, primary_key: true)
-    field(:event_id, :string)
-    field(:origin_server_ts, :integer)
-    timestamps(updated_at: false)
+    field :session_id, :string, primary_key: true
+    field :message_index, :integer, primary_key: true
+    field :event_id, :string
+    field :origin_server_ts, :integer
+    timestamps updated_at: false
   end
 end

@@ -6,8 +6,7 @@ defmodule Matrx.Repo.Migrations.CreateMegolmKeyRequests do
     create table(:megolm_key_requests, primary_key: false) do
       add :id, :binary_id, primary_key: true
 
-      add :owner_id, references(:sessions, type: :binary_id, on_delete: :delete_all),
-        null: false
+      add :owner_id, references(:sessions, type: :binary_id, on_delete: :delete_all), null: false
 
       add :room_id, :string, null: false
       add :session_id, :string, null: false
