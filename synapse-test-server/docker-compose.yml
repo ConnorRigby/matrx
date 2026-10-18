@@ -1,0 +1,12 @@
+services:
+    synapse:
+        image: matrixdotorg/synapse:latest
+        container_name: synapse-testing
+        restart: unless-stopped
+        environment:
+            - SYNAPSE_SERVER_NAME=big-bug1.local
+            - SYNAPSE_REPORT_STATS=yes
+        volumes:
+            - /home/connorrigby/workspace/pressy4pie.dev/matrx/synapse-test-server/data:/data
+        ports:
+            - "8888:8008"
