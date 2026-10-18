@@ -10,6 +10,7 @@ defmodule Matrx.APIError do
           | :m_invalid_signature
           | :m_user_in_use
           | :m_invalid_username
+          | :m_unknown_token
   @type t :: %__MODULE__{errcode: errcode, error: String.t()}
 
   def from_json(%{"errcode" => "M_FORBIDDEN", "error" => error}) do
@@ -42,5 +43,9 @@ defmodule Matrx.APIError do
 
   def from_json(%{"errcode" => "M_INVALID_USERNAME", "error" => error}) do
     %__MODULE__{errcode: :m_invalid_username, error: error}
+  end
+
+  def from_json(%{"errcode" => "M_UNKNOWN_TOKEN", "error" => error}) do
+    %__MODULE__{errcode: :m_unknown_token, error: error}
   end
 end

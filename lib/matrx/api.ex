@@ -74,6 +74,9 @@ defmodule Matrx.API do
 
       {:ok, %{body: body}} ->
         {:error, Matrx.APIError.from_json(body)}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

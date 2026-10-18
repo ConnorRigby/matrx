@@ -287,6 +287,16 @@ defmodule Matrx.Support.FakeAPI do
   def upload_signing_keys(session, body),
     do: GenServer.call(feed(session), {:upload_signing_keys, session.user_id, body})
 
+  def whoami(session) do
+    {:ok, devices} = list_devices(session)
+
+    if Enum.any?(devices, &(&1["device_id"] == session.device_id)) do
+      {:ok, %{user_id: session.user_id, device_id: session.device_id}}
+    else
+      {:error, %Matrx.APIError{errcode: :m_unknown_token, error: "Unknown token"}}
+    end
+  end
+
   def list_devices(session),
     do: {:ok, GenServer.call(feed(session), {:list_devices, session.user_id})}
 

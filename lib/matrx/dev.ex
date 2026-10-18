@@ -28,7 +28,7 @@ defmodule Matrx.Dev do
   def connect(homeserver, username, opts \\ []) do
     migrate()
     uri = URI.parse(homeserver)
-    session = stored_session(uri, username, opts) || login(uri, username, opts)
+    session = login(uri, username, opts)
     start_sync(session, opts)
     session
   end
@@ -217,45 +217,20 @@ defmodule Matrx.Dev do
 
   def format(_room_id, %{type: type, sender: sender}), do: "#{sender}: <#{type}>"
 
-  defp stored_session(uri, username, opts) do
-    if Keyword.get(opts, :new_device, false) do
-      nil
-    else
-      # the user id's domain is the server name, which may differ from the URL's host
-      user_prefix = "@#{username}:"
-
-      query =
-        from(s in Session,
-          where: s.home_server_uri == ^URI.to_string(uri),
-          order_by: [desc: s.inserted_at]
-        )
-
-      query
-      |> Repo.all()
-      |> Enum.find(&String.starts_with?(&1.user_id, user_prefix))
-      |> case do
-        nil -> nil
-        stored -> Session.load_account(stored)
-      end
-    end
-  end
-
   defp login(uri, username, opts) do
-    password =
-      Keyword.get(opts, :password) || System.get_env("MATRIX_PASSWORD") ||
+    password = Keyword.get(opts, :password) || System.get_env("MATRIX_PASSWORD")
+
+    case Session.restore_or_login(uri, username, password, opts) do
+      {:ok, session} ->
+        session
+
+      {:error, :password_required} ->
         raise ArgumentError, "pass `password:` or set MATRIX_PASSWORD"
 
-    login_opts = Keyword.take(opts, [:api])
-
-    case Session.login_password(uri, %{type: "m.id.user", user: username}, password, login_opts) do
-      {:ok, session} -> session
-      {:error, reason} -> raise "login failed: #{inspect(reason)}"
+      {:error, reason} ->
+        raise "login failed: #{inspect(reason)}"
     end
   end
 
-  defp migrate do
-    path = Application.app_dir(:matrx, "priv/repo/migrations")
-    Ecto.Migrator.run(Repo, path, :up, all: true, log: false)
-    :ok
-  end
+  defp migrate, do: Repo.migrate()
 end

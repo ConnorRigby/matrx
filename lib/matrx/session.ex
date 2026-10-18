@@ -144,6 +144,65 @@ defmodule Matrx.Session do
     end
   end
 
+  @doc """
+  The stored session for `username` on this homeserver, or a new login.
+
+  The newest stored device is reused, so restarting doesn't create a new
+  device (and Olm account) each time. Options: `:new_device` to always log in
+  again, and `:api`. Fails with `{:error, :password_required}` when a login is
+  needed and `password` is nil.
+  """
+  @spec restore_or_login(URI.t() | String.t(), String.t(), String.t() | nil, keyword()) ::
+          {:ok, t()} | {:error, term()}
+  def restore_or_login(home_server_uri, username, password, opts \\ []) do
+    uri = to_uri(home_server_uri)
+    api = Keyword.get(opts, :api, Matrx.API)
+
+    case if(opts[:new_device], do: nil, else: usable(stored(uri, username), api)) do
+      %__MODULE__{} = session ->
+        {:ok, load_account(session)}
+
+      nil when is_nil(password) ->
+        {:error, :password_required}
+
+      nil ->
+        login_password(
+          uri,
+          %{type: "m.id.user", user: username},
+          password,
+          Keyword.take(opts, [:api])
+        )
+    end
+  end
+
+  # Only a token the server explicitly rejects (logged out, device deleted)
+  # discards the stored device. Network errors keep it, so an outage during a
+  # restart doesn't churn devices.
+  defp usable(nil, _api), do: nil
+
+  defp usable(session, api) do
+    case api.whoami(session) do
+      {:error, %Matrx.APIError{errcode: :m_unknown_token}} ->
+        delete(session)
+        nil
+
+      _ ->
+        session
+    end
+  end
+
+  # The user id's domain is the server name, which may differ from the URL's host
+  defp stored(uri, username) do
+    prefix = "@#{username}:"
+
+    from(s in __MODULE__,
+      where: s.home_server_uri == ^URI.to_string(uri),
+      order_by: [desc: s.inserted_at]
+    )
+    |> Repo.all()
+    |> Enum.find(&String.starts_with?(&1.user_id, prefix))
+  end
+
   @spec load_account(t()) :: t()
   def load_account(%__MODULE__{} = session) do
     session = Repo.preload(session, :account)

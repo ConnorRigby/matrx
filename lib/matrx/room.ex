@@ -4,6 +4,8 @@ defmodule Matrx.Room do
   alias Matrx.Crypto.RoomEncryption
   alias Matrx.Room.Timeline
 
+  @events_topic "events"
+
   @type room_id :: String.t()
   @type event_content :: Timeline.event_content()
   @type event_type :: Timeline.event_type()
@@ -64,10 +66,17 @@ defmodule Matrx.Room do
     Phoenix.PubSub.unsubscribe(Matrx.PubSub, "rooms:#{room_id}")
   end
 
-  @doc "Deliver an event to the room's subscribers"
+  @doc """
+  Deliver an event to the room's subscribers (as the bare event), and to
+  `Matrx.Consumer`s (as `{:room_event, room_id, event}` on `events_topic/0`).
+  """
   def broadcast_event(room_id, event) do
     Phoenix.PubSub.broadcast(Matrx.PubSub, "rooms:#{room_id}", event)
+    Phoenix.PubSub.broadcast(Matrx.PubSub, @events_topic, {:room_event, room_id, event})
   end
+
+  @doc "PubSub topic carrying the events of every room"
+  def events_topic, do: @events_topic
 
   def sync_invite(room_pid, invite) when is_pid(room_pid) do
     GenServer.cast(room_pid, {:sync_invite, invite})
@@ -213,7 +222,7 @@ defmodule Matrx.Room do
   end
 
   def dispatch_timeline_events(timeline, [%{state_key: nil} = event | next], state) do
-    Phoenix.PubSub.broadcast(Matrx.PubSub, "rooms:#{state.room_id}", event)
+    broadcast_event(state.room_id, event)
     dispatch_timeline_events(timeline, next, state)
   end
 

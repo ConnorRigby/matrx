@@ -10,6 +10,7 @@ defmodule Matrx.Application do
     children = [
       {Phoenix.PubSub, name: Matrx.PubSub},
       Matrx.Repo,
+      {Task.Supervisor, name: Matrx.TaskSupervisor},
       {Registry, keys: :unique, name: Matrx.RoomRegistry},
       Matrx.RoomSupervisor
       # Starts a worker by calling: Matrx.Worker.start_link(arg)
