@@ -2,7 +2,9 @@ defmodule Matrx.API.Event.RoomJoinRules do
   defstruct [:allow, :join_rule]
 
   def from_response(content) do
-    allow = if content["allow"], do: allow_condition_from_response(content.allow)
+    allow =
+      if is_list(content["allow"]),
+        do: Enum.map(content["allow"], &allow_condition_from_response/1)
 
     %__MODULE__{
       allow: allow,
@@ -20,4 +22,5 @@ defmodule Matrx.API.Event.RoomJoinRules do
   defp join_rule_from_response("private"), do: :private
   defp join_rule_from_response("restricted"), do: :restricted
   defp join_rule_from_response("knock_restricted"), do: :knock_restricted
+  defp join_rule_from_response(other), do: other
 end

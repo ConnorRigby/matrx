@@ -1,20 +1,22 @@
 defmodule Matrx.API.DeviceKeys do
-  defstruct [:device_keys]
+  @moduledoc """
+  Response of `/keys/query`. Device objects are kept exactly as received
+  (string keys), since their signatures are checked against the original JSON.
+  """
 
-  def from_response(%{"device_keys" => device_keys}) do
-    device_keys =
-      Map.new(device_keys, fn {user_id, keys} ->
-        {user_id,
-         Map.new(keys, fn {key_id, key} ->
-           {key_id,
-            %{
-              algorithms: key["algorithms"],
-              device_id: key["device_id"],
-              keys: key["keys"]
-            }}
-         end)}
-      end)
+  defstruct device_keys: %{},
+            failures: %{},
+            master_keys: %{},
+            self_signing_keys: %{},
+            user_signing_keys: %{}
 
-    %__MODULE__{device_keys: device_keys}
+  def from_response(response) do
+    %__MODULE__{
+      device_keys: response["device_keys"] || %{},
+      failures: response["failures"] || %{},
+      master_keys: response["master_keys"] || %{},
+      self_signing_keys: response["self_signing_keys"] || %{},
+      user_signing_keys: response["user_signing_keys"] || %{}
+    }
   end
 end

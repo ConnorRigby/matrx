@@ -6,6 +6,8 @@ defmodule Matrx.Olm.Session do
 
       @type t :: %__MODULE__{
               session_id: String.t(),
+              owner_id: Ecto.UUID.t() | nil,
+              sender_key: String.t() | nil,
               # user_id: String.t(),
               # user: Ecto.Association.NotLoaded.t() | User.t(),
               # device_id: String.t(),
@@ -26,7 +28,8 @@ defmodule Matrx.Olm.Session do
         field(:session, :map, virtual: true)
         field(:pickle, :binary)
         field(:pickle_data, :map, source: :pickle)
-        # field :sender_key, :string
+        field(:owner_id, :binary_id)
+        field(:sender_key, :string)
         # field :recipient_key, :string
 
         # belongs_to :device, Matrx.Device,
@@ -46,7 +49,9 @@ defmodule Matrx.Olm.Session do
         olm_session
         |> cast(attrs, [
           :session_id,
-          :pickle
+          :pickle,
+          :owner_id,
+          :sender_key
           # :device_id, :user_id,
           # :sender_key, :recipient_key
         ])

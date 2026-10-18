@@ -41,7 +41,8 @@ defmodule Vodozemac do
 
   ## OLM
 
-  @spec create_outbound_session(account(), String.t(), String.t()) :: session()
+  @spec create_outbound_session(account(), String.t(), String.t()) ::
+          {:ok, session()} | {:error, :invalid_message}
   def create_outbound_session(_res, _public_key, _one_time_key),
     do: :erlang.nif_error(:nif_not_loaded)
 
@@ -92,8 +93,19 @@ defmodule Vodozemac do
   @spec unpickle_group_session(String.t()) :: outbound_group_session()
   def unpickle_group_session(_pickle), do: :erlang.nif_error(:nif_not_loaded)
 
-  @spec create_inbound_group_session(String.t()) :: inbound_group_session()
+  @spec create_inbound_group_session(String.t()) ::
+          {:ok, inbound_group_session()} | {:error, :invalid_message}
   def create_inbound_group_session(_session_key), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc "Create an inbound session from an exported key, as found in `m.forwarded_room_key`"
+  @spec import_inbound_group_session(String.t()) ::
+          {:ok, inbound_group_session()} | {:error, :invalid_message}
+  def import_inbound_group_session(_exported_key), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc "Export the session from the first index it can decrypt, as sent in `m.forwarded_room_key`"
+  @spec export_inbound_group_session(inbound_group_session()) :: String.t()
+  def export_inbound_group_session(_inbound_group_session),
+    do: :erlang.nif_error(:nif_not_loaded)
 
   @spec inbound_group_session_id(inbound_group_session()) :: String.t()
   def inbound_group_session_id(_inbound_group_session), do: :erlang.nif_error(:nif_not_loaded)

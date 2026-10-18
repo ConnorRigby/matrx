@@ -23,6 +23,16 @@ defmodule Matrx.API.Event do
     :unsigned
   ]
 
+  @type t :: %__MODULE__{
+          type: String.t(),
+          event_id: String.t() | nil,
+          sender: String.t() | nil,
+          state_key: String.t() | nil,
+          origin_server_ts: integer() | nil,
+          content: map() | nil,
+          unsigned: map() | nil
+        }
+
   def from_response(%{"type" => type} = event) do
     %__MODULE__{
       type: type,

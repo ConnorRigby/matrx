@@ -4,8 +4,7 @@ defmodule Matrx.SyncLongPoll do
   alias Matrx.Presence
   alias Matrx.RoomSupervisor
   alias Matrx.Room
-
-  @api Matrx.API
+  alias Matrx.Crypto.{Devices, KeyRequests, RoomMessages, ToDevice}
 
   @doc """
   Start a sync session
@@ -23,8 +22,22 @@ defmodule Matrx.SyncLongPoll do
   def init(args) do
     server = self()
     session = Keyword.fetch!(args, :session)
-    sync = spawn_monitor(fn -> sync_process(server, session) end)
-    state = %{session: session, sync: sync, one_time_key_counts: nil, awaiting_sync: nil}
+    api = Keyword.get(args, :api, Matrx.API)
+    sync = spawn_monitor(fn -> sync_process(server, api, session) end)
+
+    state = %{
+      session: session,
+      api: api,
+      sync: sync,
+      one_time_key_counts: nil,
+      # encrypted events waiting for their room key, as {room_id, event}
+      pending: [],
+      # how long an event waits for its key to arrive on its own before we ask for it
+      key_request_delay: Keyword.get(args, :key_request_delay, 5_000),
+      key_request_timer: nil,
+      awaiting_sync: nil
+    }
+
     {:ok, state}
   end
 
@@ -37,12 +50,18 @@ defmodule Matrx.SyncLongPoll do
   @impl GenServer
   def handle_info({:DOWN, mon, :process, pid, reason}, %{sync: {pid, mon}} = state)
       when reason in [:normal, :killed] do
-    {:noreply, %{state | sync: nil}, {:continue, [:sync]}}
+    {:noreply, %{state | sync: nil}}
   end
 
   def handle_info({:DOWN, mon, :process, pid, reason}, %{sync: {pid, mon}} = state) do
     Logger.error(%{sync_error: reason})
     {:stop, reason, %{state | sync: nil}}
+  end
+
+  def handle_info(:request_missing_keys, %{session: %Matrx.Session{} = session} = state) do
+    state = retry_pending(%{state | key_request_timer: nil})
+    KeyRequests.request(session, state.pending, api: state.api)
+    {:noreply, state}
   end
 
   def handle_info(%Matrx.API.Sync{} = sync, state) do
@@ -54,7 +73,12 @@ defmodule Matrx.SyncLongPoll do
     to_device = if sync.to_device, do: [{:sync_to_device, sync.to_device.events}], else: []
     device_lists = if sync.device_lists, do: [{:sync_device_lists, sync.device_lists}], else: []
 
-    events = account_data ++ presence ++ rooms ++ to_device ++ device_lists
+    keys =
+      if replenish_keys?(state, sync),
+        do: [{:replenish_keys, sync.device_one_time_keys_count}],
+        else: []
+
+    events = keys ++ account_data ++ presence ++ rooms ++ to_device ++ device_lists
     if state.awaiting_sync, do: GenServer.reply(state.awaiting_sync, sync)
     state = %{state | one_time_key_counts: sync.device_one_time_keys_count, awaiting_sync: nil}
 
@@ -69,6 +93,17 @@ defmodule Matrx.SyncLongPoll do
   @impl GenServer
   def handle_continue([], state) do
     {:noreply, state, :hibernate}
+  end
+
+  def handle_continue([{:replenish_keys, counts} | next], state) do
+    case Matrx.Crypto.Keys.maybe_replenish(state.session, counts.signed_curve25519 || 0,
+           api: state.api
+         ) do
+      {:error, reason} -> Logger.error("Failed to upload one-time keys: #{inspect(reason)}")
+      _ -> :ok
+    end
+
+    {:noreply, state, {:continue, next}}
   end
 
   def handle_continue([{:sync_account_data, []} | next], state) do
@@ -89,11 +124,15 @@ defmodule Matrx.SyncLongPoll do
   end
 
   def handle_continue([{:sync_to_device, []} | next], state) do
-    {:noreply, state, {:continue, next}}
+    {:noreply, retry_pending(state), {:continue, next}}
   end
 
   def handle_continue([{:sync_to_device, [event | rest]} | next], state) do
-    Logger.warning("Unhandled device event: #{inspect(event)}")
+    case state.session do
+      %Matrx.Session{} = session -> ToDevice.handle(session, event, api: state.api)
+      _ -> Logger.warning("Unhandled device event: #{inspect(event)}")
+    end
+
     {:noreply, state, {:continue, [{:sync_to_device, rest} | next]}}
   end
 
@@ -107,27 +146,27 @@ defmodule Matrx.SyncLongPoll do
     {:noreply, state, {:continue, changed ++ left ++ next}}
   end
 
-  def handle_continue([{:sync_device_lists_changed, [changed | rest]} | next], state) do
-    # Logger.warning("sync_device_lists_changed: #{inspect(changed)}")
-    _ = changed
-    {:noreply, state, {:continue, [{:sync_device_lists_changed, rest} | next]}}
-  end
+  def handle_continue([{:sync_device_lists_changed, changed} | next], state) do
+    with %Matrx.Session{} = session <- state.session do
+      :ok = Devices.mark_outdated(session, changed)
 
-  def handle_continue([{:sync_device_lists_changed, []} | next], state) do
+      case Devices.refresh(session, api: state.api) do
+        :ok -> :ok
+        {:error, reason} -> Logger.error("Failed to refresh devices: #{inspect(reason)}")
+      end
+    end
+
     {:noreply, state, {:continue, next}}
   end
 
-  def handle_continue([{:sync_device_lists_left, [left | rest]} | next], state) do
-    # Logger.warning("sync_device_lists_left: #{inspect(left)}")
-    _ = left
-    {:noreply, state, {:continue, [{:sync_device_lists_left, rest} | next]}}
-  end
-
-  def handle_continue([{:sync_device_lists_left, []} | next], state) do
+  def handle_continue([{:sync_device_lists_left, left} | next], state) do
+    with %Matrx.Session{} = session <- state.session, do: Devices.untrack(session, left)
     {:noreply, state, {:continue, next}}
   end
 
   def handle_continue([{:sync_rooms, rooms} | next], state) do
+    {rooms, state} = decrypt_rooms(rooms, state)
+
     sync_fun = fn inner ->
       fn {room_id, data} ->
         with {:ok, room_pid} <- RoomSupervisor.start_room(room_id) do
@@ -139,19 +178,177 @@ defmodule Matrx.SyncLongPoll do
       end
     end
 
+    touched = Map.keys(rooms.join || %{}) ++ Map.keys(rooms.leave || %{})
+    before = state_members_before(state, touched)
+
     if rooms.invite, do: Enum.each(rooms.invite, sync_fun.(&Room.sync_invite/2))
     if rooms.join, do: Enum.each(rooms.join, sync_fun.(&Room.sync_join/2))
     if rooms.knock, do: Enum.each(rooms.knock, sync_fun.(&Room.sync_knock/2))
     if rooms.leave, do: Enum.each(rooms.leave, sync_fun.(&Room.sync_leave/2))
 
+    if rooms.join, do: track_encrypted_room_members(state, Map.keys(rooms.join))
+    untrack_departed_users(state.session, before, touched)
+
     {:noreply, state, {:continue, next}}
   end
 
-  defp sync_process(parent, session, query \\ nil) do
-    case @api.sync(session, query) do
+  @max_pending 500
+
+  defp decrypt_rooms(%{join: join, leave: leave} = rooms, %{session: %Matrx.Session{}} = state) do
+    {join, state} = decrypt_room_map(join, state)
+    {leave, state} = decrypt_room_map(leave, state)
+    {%{rooms | join: join, leave: leave}, state}
+  end
+
+  defp decrypt_rooms(rooms, state), do: {rooms, state}
+
+  defp decrypt_room_map(nil, state), do: {nil, state}
+
+  defp decrypt_room_map(rooms, state) do
+    Enum.reduce(rooms, {%{}, state}, fn {room_id, room}, {acc, state} ->
+      {events, state} =
+        Enum.map_reduce(room.timeline.events, state, &decrypt_event(room_id, &1, &2))
+
+      {Map.put(acc, room_id, %{room | timeline: %{room.timeline | events: events}}), state}
+    end)
+  end
+
+  defp decrypt_event(room_id, event, state) do
+    if RoomMessages.encrypted?(event) do
+      case RoomMessages.decrypt(state.session, room_id, event) do
+        {:ok, decrypted} ->
+          {decrypted, state}
+
+        {:error, :unknown_session} ->
+          {event, add_pending(state, room_id, event)}
+
+        {:error, reason} ->
+          Logger.warning("Could not decrypt #{event.event_id} in #{room_id}: #{inspect(reason)}")
+          {event, state}
+      end
+    else
+      {event, state}
+    end
+  end
+
+  defp add_pending(state, room_id, event) do
+    %{state | pending: Enum.take(state.pending ++ [{room_id, event}], -@max_pending)}
+    |> schedule_key_request()
+  end
+
+  defp schedule_key_request(%{key_request_timer: nil} = state) do
+    timer = Process.send_after(self(), :request_missing_keys, state.key_request_delay)
+    %{state | key_request_timer: timer}
+  end
+
+  defp schedule_key_request(state), do: state
+
+  # Called once new room keys may have arrived
+  defp retry_pending(%{pending: []} = state), do: state
+
+  defp retry_pending(state) do
+    pending =
+      Enum.filter(state.pending, fn {room_id, event} ->
+        case RoomMessages.decrypt(state.session, room_id, event) do
+          {:ok, decrypted} ->
+            Room.broadcast_event(room_id, decrypted)
+            false
+
+          {:error, :unknown_session} ->
+            true
+
+          {:error, reason} ->
+            Logger.warning(
+              "Could not decrypt #{event.event_id} in #{room_id}: #{inspect(reason)}"
+            )
+
+            false
+        end
+      end)
+
+    %{state | pending: pending}
+  end
+
+  # Room.sync_join/2 is a cast, but the state calls below come from the same
+  # process, so they are handled after it and see the updated room state.
+  defp track_encrypted_room_members(%{session: %Matrx.Session{} = session} = state, room_ids) do
+    users =
+      room_ids
+      |> Enum.flat_map(&encrypted_room_members/1)
+      |> Enum.uniq()
+
+    if users != [] do
+      :ok = Devices.track(session, users)
+
+      case Devices.refresh(session, api: state.api) do
+        :ok -> :ok
+        {:error, reason} -> Logger.error("Failed to refresh devices: #{inspect(reason)}")
+      end
+    end
+  end
+
+  defp track_encrypted_room_members(_state, _room_ids), do: :ok
+
+  defp encrypted_room_members(room_id) do
+    case Room.encryption_info(room_id) do
+      {:ok, %{members: members}} -> members
+      :error -> []
+    end
+  end
+
+  defp state_members_before(%{session: %Matrx.Session{} = session}, room_ids),
+    do: joined_encrypted_members(session, room_ids)
+
+  defp state_members_before(_state, _room_ids), do: MapSet.new()
+
+  # Users in encrypted rooms we have joined; rooms we are not in don't count
+  defp joined_encrypted_members(session, room_ids) do
+    room_ids
+    |> Enum.flat_map(fn room_id ->
+      case Room.encryption_info(room_id) do
+        {:ok, %{joined: joined, members: members}} ->
+          if session.user_id in joined, do: members, else: []
+
+        :error ->
+          []
+      end
+    end)
+    |> MapSet.new()
+  end
+
+  defp known_room_ids do
+    Matrx.RoomRegistry |> Registry.select([{{:"$1", :_, :_}, [], [:"$1"]}])
+  end
+
+  # Stop tracking users who were in the rooms of this sync, but share no
+  # encrypted room with us any more
+  defp untrack_departed_users(%Matrx.Session{} = session, before, room_ids) do
+    gone = MapSet.difference(before, joined_encrypted_members(session, room_ids))
+    still_shared = joined_encrypted_members(session, known_room_ids())
+
+    departed =
+      gone
+      |> MapSet.difference(still_shared)
+      |> MapSet.delete(session.user_id)
+      |> MapSet.to_list()
+
+    if departed != [], do: Devices.untrack(session, departed)
+    :ok
+  end
+
+  defp untrack_departed_users(_session, _before, _room_ids), do: :ok
+
+  # Only real sessions own an Olm account; the server's count is absent on most syncs
+  defp replenish_keys?(%{session: %Matrx.Session{}}, %{device_one_time_keys_count: counts}),
+    do: counts != nil
+
+  defp replenish_keys?(_state, _sync), do: false
+
+  defp sync_process(parent, api, session, query \\ nil) do
+    case api.sync(session, query) do
       {:ok, sync} ->
         send(parent, sync)
-        sync_process(parent, session, %{since: sync.next_batch, timeout: :timer.seconds(30)})
+        sync_process(parent, api, session, %{since: sync.next_batch, timeout: :timer.seconds(30)})
 
       error ->
         error

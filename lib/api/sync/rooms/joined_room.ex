@@ -28,7 +28,7 @@ defmodule Matrx.API.Sync.Rooms.JoinedRoom do
     %__MODULE__{
       account_data: account_data,
       ephemeral: response["ephemeral"],
-      state: response["state"],
+      state: state_from_response(response["state"]),
       summary: response["summary"],
       timeline: timeline_from_response(response["timeline"]),
       unread_notifications: unread_notifications
@@ -42,4 +42,9 @@ defmodule Matrx.API.Sync.Rooms.JoinedRoom do
       prev_batch: timeline["prev_batch"]
     }
   end
+
+  defp state_from_response(%{"events" => events}),
+    do: %{events: Enum.map(events, &Event.from_response/1)}
+
+  defp state_from_response(_), do: %{events: []}
 end

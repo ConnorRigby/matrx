@@ -11,4 +11,7 @@ defmodule Matrx.API.Event.RoomMember do
 
   defp membership_from_response("leave"), do: :leave
   defp membership_from_response("join"), do: :join
+  defp membership_from_response("invite"), do: :invite
+  defp membership_from_response("knock"), do: :knock
+  defp membership_from_response("ban"), do: :ban
 end

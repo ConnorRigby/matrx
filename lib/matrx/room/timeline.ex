@@ -13,7 +13,7 @@ defmodule Matrx.Room.Timeline do
 
   @spec init(room_id()) :: t()
   def init(room_id) do
-    store = :ets.new(:undefined, [:bag])
+    store = :ets.new(:undefined, [:set])
     %__MODULE__{room_id: room_id, store: store}
   end
 

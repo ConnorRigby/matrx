@@ -17,6 +17,22 @@ defmodule Matrx.Olm do
     end
   end
 
+  @doc "Unpickle the account of a stored `Account` row"
+  @spec load_account(Account.t()) :: Account.t()
+  def load_account(%Account{account: account} = row) when is_reference(account), do: row
+
+  def load_account(%Account{pickle: pickle} = row) do
+    %{row | account: Vodozemac.unpickle(pickle)}
+  end
+
+  @doc "Persist the current state of the account (needed after generating keys)"
+  @spec save_account(Account.t()) :: {:ok, Account.t()} | {:error, Ecto.Changeset.t()}
+  def save_account(%Account{account: account} = row) when is_reference(account) do
+    row
+    |> Ecto.Changeset.change(pickle: Vodozemac.pickle(account))
+    |> Repo.update()
+  end
+
   @spec identity_keys(Account.t()) :: Vodozemac.identity_keys()
   def identity_keys(%{account: account}) when is_reference(account) do
     Vodozemac.identity_keys(account)
@@ -32,37 +48,60 @@ defmodule Matrx.Olm do
     Vodozemac.mark_keys_as_published(account)
   end
 
-  @spec create_outbound_session(Account.t(), Vodozemac.public_key(), Vodozemac.one_time_key()) ::
-          {:ok, OutboundSession.t()} | {:error, Ecto.Changeset.t()}
-  def create_outbound_session(%{account: account}, public_key, one_time_key) do
-    outbound_session = Vodozemac.create_outbound_session(account, public_key, one_time_key)
-    pickle = Vodozemac.pickle_session(outbound_session)
-    session_id = Vodozemac.session_id(outbound_session)
+  @doc "Unpickle the session of a stored session row"
+  @spec load_session(OutboundSession.t() | InboundSession.t()) ::
+          OutboundSession.t() | InboundSession.t()
+  def load_session(%{session: session} = row) when is_reference(session), do: row
 
-    OutboundSession.changeset(%OutboundSession{session: outbound_session}, %{
-      session_id: session_id,
-      pickle: pickle
-    })
-    |> Repo.insert()
+  def load_session(%{pickle: pickle} = row),
+    do: %{row | session: Vodozemac.unpickle_session(pickle)}
+
+  @doc """
+  `attrs` (`:owner_id`, `:sender_key`) are stored with the session so it can be
+  found again by the peer's key.
+  """
+  @spec create_outbound_session(
+          Account.t(),
+          Vodozemac.public_key(),
+          Vodozemac.one_time_key(),
+          map()
+        ) ::
+          {:ok, OutboundSession.t()} | {:error, Ecto.Changeset.t() | :invalid_message}
+  def create_outbound_session(%{account: account}, public_key, one_time_key, attrs \\ %{}) do
+    with {:ok, outbound_session} <-
+           Vodozemac.create_outbound_session(account, public_key, one_time_key) do
+      pickle = Vodozemac.pickle_session(outbound_session)
+      session_id = Vodozemac.session_id(outbound_session)
+
+      OutboundSession.changeset(
+        %OutboundSession{session: outbound_session},
+        Map.merge(attrs, %{session_id: session_id, pickle: pickle})
+      )
+      |> Repo.insert()
+    end
   end
 
-  @spec create_inbound_session(Account.t(), Vodozemac.public_key(), String.t()) ::
-          {:ok, {String.t(), InboundSession.t()}} | {:error, Ecto.Changeset.t()}
-  def create_inbound_session(%{account: account}, public_key, message) do
-    {:ok, {decrypted, inbound_session}} =
-      Vodozemac.create_inbound_session(account, public_key, message)
+  @doc """
+  Create an inbound session from a pre-key message. This consumes a one-time key
+  of the account, so the account must be saved afterwards (`save_account/1`).
+  """
+  @spec create_inbound_session(Account.t(), Vodozemac.public_key(), String.t(), map()) ::
+          {:ok, {String.t(), InboundSession.t()}} | {:error, Ecto.Changeset.t() | term()}
+  def create_inbound_session(%{account: account}, public_key, message, attrs \\ %{}) do
+    with {:ok, {decrypted, inbound_session}} <-
+           Vodozemac.create_inbound_session(account, public_key, message) do
+      pickle = Vodozemac.pickle_session(inbound_session)
+      session_id = Vodozemac.session_id(inbound_session)
 
-    pickle = Vodozemac.pickle_session(inbound_session)
-    session_id = Vodozemac.session_id(inbound_session)
+      changeset =
+        InboundSession.changeset(
+          %InboundSession{session: inbound_session},
+          Map.merge(attrs, %{session_id: session_id, pickle: pickle})
+        )
 
-    changeset =
-      InboundSession.changeset(%InboundSession{session: inbound_session}, %{
-        session_id: session_id,
-        pickle: pickle
-      })
-
-    with {:ok, inbound_session} = Repo.insert(changeset) do
-      {:ok, {decrypted, inbound_session}}
+      with {:ok, inbound_session} <- Repo.insert(changeset) do
+        {:ok, {decrypted, inbound_session}}
+      end
     end
   end
 

@@ -9,7 +9,7 @@ defmodule Matrx.API.Sync.Rooms.LeftRoom do
 
     %__MODULE__{
       account_data: account_data,
-      state: response["state"],
+      state: state_from_response(response["state"]),
       state_after: response["state_after"],
       timeline: timeline_from_response(response["timeline"])
     }
@@ -22,4 +22,9 @@ defmodule Matrx.API.Sync.Rooms.LeftRoom do
       prev_batch: timeline["prev_batch"]
     }
   end
+
+  defp state_from_response(%{"events" => events}),
+    do: %{events: Enum.map(events, &Event.from_response/1)}
+
+  defp state_from_response(_), do: %{events: []}
 end

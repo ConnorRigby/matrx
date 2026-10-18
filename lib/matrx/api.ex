@@ -24,12 +24,19 @@ defmodule Matrx.API do
   end
 
   @impl Matrx.APIBehaviour
-  def login_password(session, identifier, password) do
-    payload = %{
-      type: "m.login.password",
-      identifier: identifier,
-      password: password
-    }
+  def login_password(session, identifier, password, opts \\ []) do
+    payload =
+      %{
+        type: "m.login.password",
+        identifier: identifier,
+        password: password
+      }
+      |> then(fn payload ->
+        case Keyword.get(opts, :device_id) do
+          nil -> payload
+          device_id -> Map.put(payload, :device_id, device_id)
+        end
+      end)
 
     case Req.post(url(session, ["_matrix", "client", "v3", "login"]), json: payload) do
       {:ok, %{status: 200, body: body}} ->
@@ -148,14 +155,17 @@ defmodule Matrx.API do
     end
   end
 
+  # `message` may carry a `"type"`, which is the event type and not part of the body
   def send_to_device(session, transaction_id, message) do
+    {type, message} = Map.pop(message, "type", "m.room.encrypted")
+
     case Req.put(
            url(session, [
              "_matrix",
              "client",
              "v3",
              "sendToDevice",
-             "m.room.encrypted",
+             type,
              transaction_id
            ]),
            headers: headers(session),
@@ -203,6 +213,70 @@ defmodule Matrx.API do
          ) do
       {:ok, %{status: 200, body: body}} ->
         {:ok, Matrx.API.DeviceKeys.from_response(body)}
+
+      {:ok, %{body: body}} ->
+        {:error, Matrx.APIError.from_json(body)}
+    end
+  end
+
+  @doc """
+  Upload cross-signing keys. Servers may answer with a user-interactive auth
+  challenge, returned as `{:error, {:uia_required, auth_session}}`.
+  """
+  def upload_signing_keys(session, body) do
+    case Req.post(
+           url(session, ["_matrix", "client", "v3", "keys", "device_signing", "upload"]),
+           headers: headers(session),
+           json: body
+         ) do
+      {:ok, %{status: 200}} ->
+        :ok
+
+      {:ok, %{status: 401, body: %{"session" => uia_session, "flows" => _}}} ->
+        {:error, {:uia_required, uia_session}}
+
+      {:ok, %{body: body}} ->
+        {:error, Matrx.APIError.from_json(body)}
+    end
+  end
+
+  @doc "Upload signatures of keys and devices. Returns the `failures` of the response."
+  def upload_signatures(session, body) do
+    case Req.post(
+           url(session, ["_matrix", "client", "v3", "keys", "signatures", "upload"]),
+           headers: headers(session),
+           json: body
+         ) do
+      {:ok, %{status: 200, body: response}} ->
+        {:ok, response["failures"] || %{}}
+
+      {:ok, %{body: body}} ->
+        {:error, Matrx.APIError.from_json(body)}
+    end
+  end
+
+  @doc "The devices of our account, as the server lists them"
+  def list_devices(session) do
+    case Req.get(url(session, ["_matrix", "client", "v3", "devices"]), headers: headers(session)) do
+      {:ok, %{status: 200, body: %{"devices" => devices}}} -> {:ok, devices}
+      {:ok, %{body: body}} -> {:error, Matrx.APIError.from_json(body)}
+    end
+  end
+
+  @doc """
+  Delete devices. Servers ask for the account password, returned as
+  `{:error, {:uia_required, auth_session}}`.
+  """
+  def delete_devices(session, body) do
+    case Req.post(url(session, ["_matrix", "client", "v3", "delete_devices"]),
+           headers: headers(session),
+           json: body
+         ) do
+      {:ok, %{status: 200}} ->
+        :ok
+
+      {:ok, %{status: 401, body: %{"session" => uia_session, "flows" => _}}} ->
+        {:error, {:uia_required, uia_session}}
 
       {:ok, %{body: body}} ->
         {:error, Matrx.APIError.from_json(body)}

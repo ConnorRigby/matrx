@@ -8,7 +8,8 @@ defmodule Matrx.MixProject do
       elixir: "~> 1.20",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      aliases: aliases()
     ]
   end
 
@@ -31,6 +32,10 @@ defmodule Matrx.MixProject do
       {:ecto_sqlite3, "~> 0.17"},
       {:phoenix_pubsub, "~> 2.2"}
     ]
+  end
+
+  defp aliases do
+    [test: ["ecto.migrate --quiet", "test"]]
   end
 
   # Specifies which paths to compile per environment.

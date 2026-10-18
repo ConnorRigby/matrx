@@ -31,7 +31,8 @@ mod atoms {
         non_contributor_key,
         too_big_message_gap,
         invalid_signature,
-        unknown_message_index
+        unknown_message_index,
+        invalid_message
     }
 }
 
@@ -155,25 +156,41 @@ pub fn create_outbound_session(
     res: ResourceArc<OlmAccountResource>,
     public_key: String,
     one_time_key: String,
-) -> ResourceArc<OlmSessionResource> {
+) -> Result<ResourceArc<OlmSessionResource>, rustler::Atom> {
+    let identity_key = vodozemac::Curve25519PublicKey::from_base64(public_key.as_str())
+        .map_err(|_| atoms::invalid_message())?;
+    let one_time_key = vodozemac::Curve25519PublicKey::from_base64(one_time_key.as_str())
+        .map_err(|_| atoms::invalid_message())?;
+
     let account = res.account.lock().unwrap();
     let session = account
         .create_outbound_session(
             vodozemac::olm::SessionConfig::default(),
-            vodozemac::Curve25519PublicKey::from_base64(public_key.as_str()).unwrap(),
-            vodozemac::Curve25519PublicKey::from_base64(one_time_key.as_str()).unwrap(),
+            identity_key,
+            one_time_key,
         )
-        .unwrap();
-    ResourceArc::new(OlmSessionResource {
+        .map_err(|_| atoms::invalid_message())?;
+
+    Ok(ResourceArc::new(OlmSessionResource {
         session: Mutex::new(session),
-    })
+    }))
 }
 
-struct CreateInboundSessionError(SessionCreationError);
+enum CreateInboundSessionError {
+    Creation(SessionCreationError),
+    InvalidMessage,
+}
 
 impl rustler::Encoder for CreateInboundSessionError {
     fn encode<'a>(&self, env: Env<'a>) -> Term<'a> {
-        match &self.0 {
+        let error = match self {
+            CreateInboundSessionError::Creation(error) => error,
+            CreateInboundSessionError::InvalidMessage => {
+                return atoms::invalid_message().encode(env)
+            }
+        };
+
+        match error {
             SessionCreationError::MissingOneTimeKey(key) => {
                 (atoms::missing_one_time_key(), key.to_base64()).encode(env)
             }
@@ -212,24 +229,23 @@ pub fn create_inbound_session(
     public_key: String,
     pre_key_message: String,
 ) -> Result<(String, ResourceArc<OlmSessionResource>), CreateInboundSessionError> {
-    let mut account = res.account.lock().unwrap();
-    account
-        .create_inbound_session(
-            SessionConfig::default(),
-            Curve25519PublicKey::from_base64(public_key.as_str()).unwrap(),
-            &PreKeyMessage::from_base64(pre_key_message.as_str()).unwrap(),
-        )
-        .map(|inbound_session| {
-            let session_res = ResourceArc::new(OlmSessionResource {
-                session: Mutex::new(inbound_session.session),
-            });
+    let public_key = Curve25519PublicKey::from_base64(public_key.as_str())
+        .map_err(|_| CreateInboundSessionError::InvalidMessage)?;
+    let message = PreKeyMessage::from_base64(pre_key_message.as_str())
+        .map_err(|_| CreateInboundSessionError::InvalidMessage)?;
 
-            (
-                String::from_utf8(inbound_session.plaintext).unwrap(),
-                session_res,
-            )
-        })
-        .map_err(CreateInboundSessionError)
+    let mut account = res.account.lock().unwrap();
+    let inbound_session = account
+        .create_inbound_session(SessionConfig::default(), public_key, &message)
+        .map_err(CreateInboundSessionError::Creation)?;
+
+    let plaintext = String::from_utf8(inbound_session.plaintext)
+        .map_err(|_| CreateInboundSessionError::InvalidMessage)?;
+    let session_res = ResourceArc::new(OlmSessionResource {
+        session: Mutex::new(inbound_session.session),
+    });
+
+    Ok((plaintext, session_res))
 }
 
 #[rustler::nif]
@@ -266,10 +282,18 @@ pub fn encrypt(res: ResourceArc<OlmSessionResource>, plaintext: String) -> (usiz
     }
 }
 
-struct DecryptError(DecryptionError);
+enum DecryptError {
+    Decryption(DecryptionError),
+    InvalidMessage,
+}
 impl rustler::Encoder for DecryptError {
     fn encode<'a>(&self, env: Env<'a>) -> Term<'a> {
-        match &self.0 {
+        let error = match self {
+            DecryptError::Decryption(error) => error,
+            DecryptError::InvalidMessage => return atoms::invalid_message().encode(env),
+        };
+
+        match error {
             DecryptionError::InvalidMAC(..) => atoms::invalid_mac().encode(env),
             DecryptionError::InvalidMACLength(expected, got) => {
                 (atoms::invalid_mac_length(), expected, got).encode(env)
@@ -292,14 +316,14 @@ pub fn decrypt(
     message_type: usize,
     ciphertext: String,
 ) -> Result<String, DecryptError> {
-    let mut session = res.session.lock().unwrap();
+    let decoded =
+        vodozemac::base64_decode(ciphertext).map_err(|_| DecryptError::InvalidMessage)?;
+    let message = vodozemac::olm::OlmMessage::from_parts(message_type, &decoded)
+        .map_err(|_| DecryptError::InvalidMessage)?;
 
-    let decoded = vodozemac::base64_decode(ciphertext).unwrap();
-    let message = vodozemac::olm::OlmMessage::from_parts(message_type, &decoded).unwrap();
-    session
-        .decrypt(&message)
-        .map(|decrypted| String::from_utf8(decrypted).unwrap())
-        .map_err(DecryptError)
+    let mut session = res.session.lock().unwrap();
+    let decrypted = session.decrypt(&message).map_err(DecryptError::Decryption)?;
+    String::from_utf8(decrypted).map_err(|_| DecryptError::InvalidMessage)
 }
 
 #[rustler::nif]
@@ -368,15 +392,41 @@ pub fn unpickle_group_session(bytes: String) -> ResourceArc<GroupSessionResource
 #[rustler::nif]
 pub fn create_inbound_group_session(
     session_key_string: String,
-) -> ResourceArc<InboundGroupSessionResource> {
-    let session_key = vodozemac::megolm::SessionKey::from_base64(&session_key_string).unwrap();
+) -> Result<ResourceArc<InboundGroupSessionResource>, rustler::Atom> {
+    let session_key = vodozemac::megolm::SessionKey::from_base64(&session_key_string)
+        .map_err(|_| atoms::invalid_message())?;
     let inbound_group_session = vodozemac::megolm::InboundGroupSession::new(
         &session_key,
         vodozemac::megolm::SessionConfig::default(),
     );
-    ResourceArc::new(InboundGroupSessionResource {
+    Ok(ResourceArc::new(InboundGroupSessionResource {
         inbound_group_session: Mutex::new(inbound_group_session),
-    })
+    }))
+}
+
+#[rustler::nif]
+pub fn import_inbound_group_session(
+    exported_key_string: String,
+) -> Result<ResourceArc<InboundGroupSessionResource>, rustler::Atom> {
+    let exported_key = vodozemac::megolm::ExportedSessionKey::from_base64(&exported_key_string)
+        .map_err(|_| atoms::invalid_message())?;
+    let inbound_group_session = vodozemac::megolm::InboundGroupSession::import(
+        &exported_key,
+        vodozemac::megolm::SessionConfig::default(),
+    );
+    Ok(ResourceArc::new(InboundGroupSessionResource {
+        inbound_group_session: Mutex::new(inbound_group_session),
+    }))
+}
+
+#[rustler::nif]
+pub fn export_inbound_group_session(res: ResourceArc<InboundGroupSessionResource>) -> String {
+    let mut session = res.inbound_group_session.lock().unwrap();
+    let index = session.first_known_index();
+    session
+        .export_at(index)
+        .expect("the first known index is always exportable")
+        .to_base64()
 }
 
 #[rustler::nif]
@@ -398,11 +448,13 @@ enum InboundGroupSessionDecryptError {
     InvalidMACLength(usize, usize),
     InvalidPadding,
     UnknownMessageIndex(u32, u32),
+    InvalidMessage,
 }
 
 impl rustler::Encoder for InboundGroupSessionDecryptError {
     fn encode<'a>(&self, env: Env<'a>) -> Term<'a> {
         match &self {
+            InboundGroupSessionDecryptError::InvalidMessage => atoms::invalid_message().encode(env),
             InboundGroupSessionDecryptError::InvalidMAC => atoms::invalid_mac().encode(env),
             InboundGroupSessionDecryptError::InvalidMACLength(expected, got) => {
                 (atoms::invalid_mac_length(), expected, got).encode(env)
@@ -423,14 +475,12 @@ pub fn decrypt_inbound_group_session_message(
     res: ResourceArc<InboundGroupSessionResource>,
     ciphertext: String,
 ) -> Result<MegOLMDecryptedMessage, InboundGroupSessionDecryptError> {
+    // ciphertext is remote input: parse before locking so a failure can't poison the mutex
+    let megolm_message = vodozemac::megolm::MegolmMessage::from_base64(&ciphertext)
+        .map_err(|_| InboundGroupSessionDecryptError::InvalidMessage)?;
     let mut inbound_group_session = res.inbound_group_session.lock().unwrap();
-    let megolm_message = vodozemac::megolm::MegolmMessage::from_base64(&ciphertext).unwrap();
-    inbound_group_session
+    let decrypted = inbound_group_session
         .decrypt(&megolm_message)
-        .map(|decrypted| MegOLMDecryptedMessage {
-            plaintext: String::from_utf8(decrypted.plaintext).unwrap(),
-            message_index: decrypted.message_index,
-        })
         .map_err(|e| match e {
             vodozemac::megolm::DecryptionError::Signature(_) => {
                 InboundGroupSessionDecryptError::InvalidSignature
@@ -451,7 +501,13 @@ pub fn decrypt_inbound_group_session_message(
             vodozemac::megolm::DecryptionError::UnknownMessageIndex(known, index) => {
                 InboundGroupSessionDecryptError::UnknownMessageIndex(known, index)
             }
-        })
+        })?;
+    let plaintext = String::from_utf8(decrypted.plaintext)
+        .map_err(|_| InboundGroupSessionDecryptError::InvalidMessage)?;
+    Ok(MegOLMDecryptedMessage {
+        plaintext,
+        message_index: decrypted.message_index,
+    })
 }
 
 #[rustler::nif]

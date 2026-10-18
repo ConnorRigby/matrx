@@ -19,6 +19,9 @@ if Mix.env() == :test do
     database: "test.db",
     pool: Ecto.Adapters.SQL.Sandbox,
     pool_size: 1,
+    # a single SQLite connection is shared by every test, so let them queue
+    queue_target: 5_000,
+    queue_interval: 10_000,
     log: false
 end
 

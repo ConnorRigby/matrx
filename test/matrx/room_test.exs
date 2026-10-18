@@ -109,4 +109,28 @@ defmodule Matrx.RoomTest do
       timeline: %{events: events, limited: false, prev_batch: nil}
     }
   end
+
+  describe "state updates" do
+    test "lookup_state and dump_state only return the latest state of a key" do
+      assert {:ok, pid} = start_supervised({Room, room_id: unique_id()})
+
+      member = fn membership ->
+        joined_room([
+          m_room_create(),
+          update_in(m_room_member("@bob:example.org", "Bob").content.membership, fn _ ->
+            membership
+          end)
+        ])
+      end
+
+      :ok = Room.sync_join(pid, member.(:join))
+      :ok = Room.sync_join(pid, member.(:leave))
+
+      assert [{"@bob:example.org", %{membership: :leave}}] =
+               Room.lookup_state(pid, "m.room.member")
+
+      assert [{{"m.room.member", "@bob:example.org"}, %{membership: :leave}}] =
+               Enum.filter(Room.dump_state(pid), &match?({{"m.room.member", _}, _}, &1))
+    end
+  end
 end
