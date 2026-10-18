@@ -20,6 +20,9 @@ defmodule Matrx.API do
 
       {:ok, %{body: body}} ->
         {:error, Matrx.APIError.from_json(body)}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -42,11 +45,11 @@ defmodule Matrx.API do
       {:ok, %{status: 200, body: body}} ->
         login_ok(body)
 
-      {:ok, %{status: 403, body: body}} ->
-        {:error, Matrx.APIError.from_json(body)}
-
       {:ok, %{body: body}} ->
         {:error, Matrx.APIError.from_json(body)}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -65,6 +68,7 @@ defmodule Matrx.API do
      }}
   end
 
+  @impl Matrx.APIBehaviour
   def whoami(session) do
     case Req.get(url(session, ["_matrix", "client", "v3", "account", "whoami"]),
            headers: headers(session)
@@ -91,6 +95,9 @@ defmodule Matrx.API do
 
       {:ok, %{body: body}} ->
         {:error, Matrx.APIError.from_json(body)}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -104,6 +111,9 @@ defmodule Matrx.API do
 
       {:ok, %{body: body}} ->
         {:error, Matrx.APIError.from_json(body)}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -117,6 +127,9 @@ defmodule Matrx.API do
 
       {:ok, %{body: body}} ->
         {:error, Matrx.APIError.from_json(body)}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -131,10 +144,13 @@ defmodule Matrx.API do
 
       {:ok, %{body: body}} ->
         {:error, Matrx.APIError.from_json(body)}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
-  # @impl Matrx.APIBehaviour
+  @impl Matrx.APIBehaviour
   def send_room_message(session, room_id, transaction_id, type, message) do
     case Req.put(
            url(session, [
@@ -188,6 +204,7 @@ defmodule Matrx.API do
   end
 
   # `message` may carry a `"type"`, which is the event type and not part of the body
+  @impl Matrx.APIBehaviour
   def send_to_device(session, transaction_id, message) do
     {type, message} = Map.pop(message, "type", "m.room.encrypted")
 
@@ -208,9 +225,13 @@ defmodule Matrx.API do
 
       {:ok, %{body: body}} ->
         {:error, Matrx.APIError.from_json(body)}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
+  @impl Matrx.APIBehaviour
   def upload_keys(session, keys) do
     case Req.post(
            url(session, [
@@ -228,9 +249,13 @@ defmodule Matrx.API do
 
       {:ok, %{body: body}} ->
         {:error, Matrx.APIError.from_json(body)}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
+  @impl Matrx.APIBehaviour
   def keys_query(session, query) do
     case Req.post(
            url(session, [
@@ -248,6 +273,9 @@ defmodule Matrx.API do
 
       {:ok, %{body: body}} ->
         {:error, Matrx.APIError.from_json(body)}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -255,6 +283,7 @@ defmodule Matrx.API do
   Upload cross-signing keys. Servers may answer with a user-interactive auth
   challenge, returned as `{:error, {:uia_required, auth_session}}`.
   """
+  @impl Matrx.APIBehaviour
   def upload_signing_keys(session, body) do
     case Req.post(
            url(session, ["_matrix", "client", "v3", "keys", "device_signing", "upload"]),
@@ -269,10 +298,14 @@ defmodule Matrx.API do
 
       {:ok, %{body: body}} ->
         {:error, Matrx.APIError.from_json(body)}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
   @doc "Upload signatures of keys and devices. Returns the `failures` of the response."
+  @impl Matrx.APIBehaviour
   def upload_signatures(session, body) do
     case Req.post(
            url(session, ["_matrix", "client", "v3", "keys", "signatures", "upload"]),
@@ -284,14 +317,19 @@ defmodule Matrx.API do
 
       {:ok, %{body: body}} ->
         {:error, Matrx.APIError.from_json(body)}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
   @doc "The devices of our account, as the server lists them"
+  @impl Matrx.APIBehaviour
   def list_devices(session) do
     case Req.get(url(session, ["_matrix", "client", "v3", "devices"]), headers: headers(session)) do
       {:ok, %{status: 200, body: %{"devices" => devices}}} -> {:ok, devices}
       {:ok, %{body: body}} -> {:error, Matrx.APIError.from_json(body)}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -299,6 +337,7 @@ defmodule Matrx.API do
   Delete devices. Servers ask for the account password, returned as
   `{:error, {:uia_required, auth_session}}`.
   """
+  @impl Matrx.APIBehaviour
   def delete_devices(session, body) do
     case Req.post(url(session, ["_matrix", "client", "v3", "delete_devices"]),
            headers: headers(session),
@@ -312,9 +351,13 @@ defmodule Matrx.API do
 
       {:ok, %{body: body}} ->
         {:error, Matrx.APIError.from_json(body)}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
+  @impl Matrx.APIBehaviour
   def claim_keys(session, claim) do
     case Req.post(
            url(session, [
@@ -332,114 +375,13 @@ defmodule Matrx.API do
 
       {:ok, %{body: body}} ->
         {:error, Matrx.APIError.from_json(body)}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
-  def device_signing_upload(session, payload, identifier, password) do
-    case Req.post(
-           url(session, [
-             "_matrix",
-             "client",
-             "v3",
-             "keys",
-             "device_signing",
-             "upload"
-           ]),
-           headers: headers(session),
-           json: payload
-         ) do
-      {:ok, %{status: 200, body: body}} ->
-        {:ok, body}
-
-      {:ok, %{status: 401, body: %{"session" => session_challenge}}} ->
-        new_payload =
-          Map.merge(payload, %{
-            auth: %{
-              type: "m.login.password",
-              identifier: identifier,
-              password: password,
-              session: session_challenge
-            }
-          })
-
-        device_signing_upload(session, new_payload, identifier, password)
-
-      {:ok, %{body: body}} ->
-        {:error, Matrx.APIError.from_json(body)}
-    end
-  end
-
-  def signatures_upload(session, payload) do
-    case Req.post(
-           url(session, [
-             "_matrix",
-             "client",
-             "v3",
-             "keys",
-             "signatures",
-             "upload"
-           ]),
-           headers: headers(session),
-           json: payload
-         ) do
-      {:ok, %{status: 200, body: body}} ->
-        {:ok, body}
-
-      {:ok, %{body: body}} ->
-        {:error, Matrx.APIError.from_json(body)}
-    end
-  end
-
-  def devices(session) do
-    case Req.get(
-           url(session, [
-             "_matrix",
-             "client",
-             "v3",
-             "devices"
-           ]),
-           headers: headers(session)
-         ) do
-      {:ok, %{status: 200, body: body}} ->
-        {:ok, Matrx.API.Devices.from_response(body)}
-
-      {:ok, %{body: body}} ->
-        {:error, Matrx.APIError.from_json(body)}
-    end
-  end
-
-  def delete_devices(session, payload, identifier, password) do
-    case Req.post(
-           url(session, [
-             "_matrix",
-             "client",
-             "v3",
-             "delete_devices"
-           ]),
-           headers: headers(session),
-           json: payload
-         ) do
-      {:ok, %{status: 200, body: body}} ->
-        {:ok, body}
-
-      {:ok, %{status: 401, body: %{"session" => session_challenge}}} ->
-        new_payload =
-          Map.merge(payload, %{
-            auth: %{
-              type: "m.login.password",
-              identifier: identifier,
-              password: password,
-              session: session_challenge
-            }
-          })
-
-        delete_devices(session, new_payload, identifier, password)
-
-      {:ok, %{body: body}} ->
-        {:error, Matrx.APIError.from_json(body)}
-    end
-  end
-
+  @impl Matrx.APIBehaviour
   def user_directory_search(session, payload) do
     case Req.post(
            url(session, [
@@ -457,9 +399,13 @@ defmodule Matrx.API do
 
       {:ok, %{body: body}} ->
         {:error, Matrx.APIError.from_json(body)}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
+  @impl Matrx.APIBehaviour
   def sync(session, query \\ nil) do
     case Req.get(
            url(
@@ -481,6 +427,9 @@ defmodule Matrx.API do
 
       {:ok, %{body: body}} ->
         {:error, Matrx.APIError.from_json(body)}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

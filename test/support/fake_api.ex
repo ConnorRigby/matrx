@@ -7,9 +7,14 @@ defmodule Matrx.Support.FakeAPI do
   feed is started with `host:`.
 
   * `sync/2` blocks until a response is pushed with `push_sync/2`, like a long poll.
-  * `register/2`, `login_password/3`, `upload_keys/2` and `keys_query/2` are served from memory. Uploads are
-    forwarded to the process that started the feed as `{:upload_keys, body}`.
+  * Calls are served from memory and implement `Matrx.APIBehaviour`. Calls that
+    send something are forwarded to the process that started the feed, e.g.
+    `{:send_room_message, room_id, type, content}`, `{:upload_media, data, type, filename}`,
+    `{:join_room, user_id, room_id}`, `{:create_room, user_id, payload}`,
+    `{:leave_room, user_id, room_id}`, `{:kick_room, user_id, room_id, payload}`.
   """
+
+  @behaviour Matrx.APIBehaviour
 
   @registry Matrx.Support.FakeAPI.Registry
 
@@ -113,6 +118,19 @@ defmodule Matrx.Support.FakeAPI do
     def handle_call({:send_room_message, room_id, type, content}, _from, state) do
       send(state.owner, {:send_room_message, room_id, type, content})
       {:reply, "$sent#{System.unique_integer([:positive])}", state}
+    end
+
+    def handle_call({:notify, message}, _from, state) do
+      send(state.owner, message)
+      {:reply, :ok, state}
+    end
+
+    def handle_call({:upload_media, data, content_type, filename}, _from, state) do
+      send(state.owner, {:upload_media, data, content_type, filename})
+
+      {:reply,
+       {:ok, %{content_uri: "mxc://fake.example/media#{System.unique_integer([:positive])}"}},
+       state}
     end
 
     def handle_call({:keys_query, requested}, _from, state) do
@@ -254,10 +272,12 @@ defmodule Matrx.Support.FakeAPI do
     GenServer.cast(feed, {:push, Matrx.API.Sync.from_response(body)})
   end
 
+  @impl Matrx.APIBehaviour
   def sync(session, _query) do
     {:ok, GenServer.call(feed(session), :poll, :infinity)}
   end
 
+  @impl Matrx.APIBehaviour
   def upload_keys(session, body) do
     count =
       GenServer.call(
@@ -284,9 +304,11 @@ defmodule Matrx.Support.FakeAPI do
   @doc "Make `/keys/device_signing/upload` ask for the password, as a real server does"
   def require_uia(feed, password), do: GenServer.call(feed, {:require_uia, password})
 
+  @impl Matrx.APIBehaviour
   def upload_signing_keys(session, body),
     do: GenServer.call(feed(session), {:upload_signing_keys, session.user_id, body})
 
+  @impl Matrx.APIBehaviour
   def whoami(session) do
     {:ok, devices} = list_devices(session)
 
@@ -297,45 +319,83 @@ defmodule Matrx.Support.FakeAPI do
     end
   end
 
+  @impl Matrx.APIBehaviour
   def list_devices(session),
     do: {:ok, GenServer.call(feed(session), {:list_devices, session.user_id})}
 
+  @impl Matrx.APIBehaviour
   def delete_devices(session, body),
     do: GenServer.call(feed(session), {:delete_devices, session.user_id, body})
 
+  @impl Matrx.APIBehaviour
   def upload_signatures(session, body) do
     :ok = GenServer.call(feed(session), {:upload_signatures, body})
     {:ok, %{}}
   end
 
+  @impl Matrx.APIBehaviour
+  def upload_media(session, data, content_type, filename \\ nil),
+    do: GenServer.call(feed(session), {:upload_media, data, content_type, filename})
+
+  @impl Matrx.APIBehaviour
   def keys_query(session, %{"device_keys" => requested}) do
     {:ok,
      Matrx.API.DeviceKeys.from_response(GenServer.call(feed(session), {:keys_query, requested}))}
   end
 
+  @impl Matrx.APIBehaviour
   def claim_keys(session, %{"one_time_keys" => requested}) do
     {:ok,
      Matrx.API.ClaimKeys.from_response(GenServer.call(feed(session), {:claim_keys, requested}))}
   end
 
+  @impl Matrx.APIBehaviour
   def send_to_device(session, _transaction_id, %{"messages" => messages} = body) do
     type = Map.get(body, "type", "m.room.encrypted")
     :ok = GenServer.call(feed(session), {:send_to_device, type, messages})
     {:ok, %{}}
   end
 
+  @impl Matrx.APIBehaviour
   def send_room_message(session, room_id, _transaction_id, type, content) do
     event_id = GenServer.call(feed(session), {:send_room_message, room_id, type, content})
     {:ok, %{event_id: event_id}}
   end
 
+  @impl Matrx.APIBehaviour
   def register(session, %{username: username} = payload) do
     {:ok, login(session, username, Map.get(payload, :device_id))}
   end
 
+  @impl Matrx.APIBehaviour
   def login_password(session, %{user: username}, _password, opts \\ []) do
     {:ok, login(session, username, Keyword.get(opts, :device_id))}
   end
+
+  @impl Matrx.APIBehaviour
+  def create_room(session, payload) do
+    room_id = "!room#{System.unique_integer([:positive])}:#{session.home_server_uri.host}"
+    :ok = notify(session, {:create_room, session.user_id, payload})
+    {:ok, %{room_id: room_id}}
+  end
+
+  @impl Matrx.APIBehaviour
+  def join_room(session, room_id), do: notify(session, {:join_room, session.user_id, room_id})
+
+  @impl Matrx.APIBehaviour
+  def leave_room(session, room_id), do: notify(session, {:leave_room, session.user_id, room_id})
+
+  @impl Matrx.APIBehaviour
+  def kick_room(session, room_id, payload),
+    do: notify(session, {:kick_room, session.user_id, room_id, payload})
+
+  @impl Matrx.APIBehaviour
+  def user_directory_search(session, payload) do
+    :ok = notify(session, {:user_directory_search, payload})
+    {:ok, %{"results" => [], "limited" => false}}
+  end
+
+  defp notify(session, message), do: GenServer.call(feed(session), {:notify, message})
 
   defp login(%{home_server_uri: %URI{host: host}}, username, device_id) do
     %{

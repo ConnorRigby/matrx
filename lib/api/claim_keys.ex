@@ -7,6 +7,8 @@ defmodule Matrx.API.ClaimKeys do
 
   defstruct failures: %{}, one_time_keys: %{}
 
+  @type t :: %__MODULE__{}
+
   def from_response(response) do
     %__MODULE__{
       failures: response["failures"] || %{},

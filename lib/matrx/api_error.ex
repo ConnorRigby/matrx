@@ -11,6 +11,8 @@ defmodule Matrx.APIError do
           | :m_user_in_use
           | :m_invalid_username
           | :m_unknown_token
+          | :m_too_large
+          | String.t()
   @type t :: %__MODULE__{errcode: errcode, error: String.t()}
 
   def from_json(%{"errcode" => "M_FORBIDDEN", "error" => error}) do
@@ -48,4 +50,16 @@ defmodule Matrx.APIError do
   def from_json(%{"errcode" => "M_UNKNOWN_TOKEN", "error" => error}) do
     %__MODULE__{errcode: :m_unknown_token, error: error}
   end
+
+  def from_json(%{"errcode" => "M_TOO_LARGE", "error" => error}) do
+    %__MODULE__{errcode: :m_too_large, error: error}
+  end
+
+  # Error codes without a dedicated atom keep the server's code string
+  def from_json(%{"errcode" => errcode} = body) when is_binary(errcode) do
+    %__MODULE__{errcode: errcode, error: body["error"]}
+  end
+
+  # Not a Matrix error body, e.g. an HTML page from a proxy
+  def from_json(other), do: %__MODULE__{errcode: :m_unknown, error: inspect(other)}
 end

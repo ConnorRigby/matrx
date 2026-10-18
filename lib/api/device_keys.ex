@@ -10,6 +10,8 @@ defmodule Matrx.API.DeviceKeys do
             self_signing_keys: %{},
             user_signing_keys: %{}
 
+  @type t :: %__MODULE__{}
+
   def from_response(response) do
     %__MODULE__{
       device_keys: response["device_keys"] || %{},

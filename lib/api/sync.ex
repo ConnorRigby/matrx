@@ -10,6 +10,8 @@ defmodule Matrx.API.Sync do
     :device_lists
   ]
 
+  @type t :: %__MODULE__{}
+
   alias Matrx.API.Sync.{
     AccountData,
     DeviceOneTimeKeyCounts,
