@@ -26,6 +26,7 @@ defmodule Matrx.MixProject do
     [
       {:jcs, "~> 0.2.0"},
       {:req, "~> 0.6.1"},
+      {:mime, "~> 2.0"},
       {:rustler, "~> 0.38.0"},
       {:x509, "~> 0.9.2"},
       {:ed25519, "~> 1.5"},

@@ -155,6 +155,35 @@ defmodule Matrx.API do
 
       {:ok, %{body: body}} ->
         {:error, Matrx.APIError.from_json(body)}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  Upload `data` to the media repository. Returns the `mxc://` URI.
+  """
+  @impl Matrx.APIBehaviour
+  def upload_media(session, data, content_type, filename \\ nil) do
+    query = if filename, do: [filename: filename]
+
+    case Req.post(url(session, ["_matrix", "media", "v3", "upload"], query),
+           headers: [{"content-type", content_type} | headers(session)],
+           body: data,
+           receive_timeout: 300_000
+         ) do
+      {:ok, %{status: 200, body: %{"content_uri" => content_uri}}} ->
+        {:ok, %{content_uri: content_uri}}
+
+      {:ok, %{body: %{"errcode" => _} = body}} ->
+        {:error, Matrx.APIError.from_json(body)}
+
+      {:ok, %{status: status, body: body}} ->
+        {:error, {:http_status, status, body}}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
