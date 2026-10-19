@@ -171,7 +171,7 @@ defmodule Matrx.Crypto.OlmMessages do
       _ -> {:error, :invalid_payload}
     end
   rescue
-    _ -> {:error, :invalid_payload}
+    ErlangError -> {:error, :invalid_payload}
   end
 
   defp verify(session, sender, sender_key, payload, our_keys, api) do

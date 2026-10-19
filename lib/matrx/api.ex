@@ -1,9 +1,25 @@
 defmodule Matrx.API do
+  @moduledoc """
+  Matrix HTTP API calls.
+
+  Rate-limited requests (`M_LIMIT_EXCEEDED` or HTTP 429) are retried up to
+  three times, including POSTs and uploads. `Retry-After` takes precedence over
+  `retry_after_ms`; without either, retries use exponential backoff starting
+  at one second. Retries reuse the original body and transaction ID.
+
+      config :matrx, Matrx.API, max_retries: 3
+
+  Set `max_retries: 0` to disable retries. Exhausted requests return the normal
+  API error, including `retry_after_ms` when supplied by the homeserver.
+  Req's existing transient-error retries for GET/HEAD requests are preserved.
+  Other POST/PUT failures are not retried.
+  """
+
   @behaviour Matrx.APIBehaviour
 
   @impl Matrx.APIBehaviour
   def register(session, payload) do
-    case Req.post(url(session, ["_matrix", "client", "v3", "register"]), json: payload) do
+    case request(:post, url(session, ["_matrix", "client", "v3", "register"]), json: payload) do
       {:ok, %{status: 200, body: body}} ->
         login_ok(body)
 
@@ -41,7 +57,7 @@ defmodule Matrx.API do
         end
       end)
 
-    case Req.post(url(session, ["_matrix", "client", "v3", "login"]), json: payload) do
+    case request(:post, url(session, ["_matrix", "client", "v3", "login"]), json: payload) do
       {:ok, %{status: 200, body: body}} ->
         login_ok(body)
 
@@ -70,7 +86,7 @@ defmodule Matrx.API do
 
   @impl Matrx.APIBehaviour
   def whoami(session) do
-    case Req.get(url(session, ["_matrix", "client", "v3", "account", "whoami"]),
+    case request(:get, url(session, ["_matrix", "client", "v3", "account", "whoami"]),
            headers: headers(session)
          ) do
       {:ok, %{status: 200, body: %{"user_id" => user_id, "device_id" => device_id}}} ->
@@ -86,7 +102,7 @@ defmodule Matrx.API do
 
   @impl Matrx.APIBehaviour
   def create_room(session, payload) do
-    case Req.post(url(session, ["_matrix", "client", "v3", "createRoom"]),
+    case request(:post, url(session, ["_matrix", "client", "v3", "createRoom"]),
            headers: headers(session),
            json: payload
          ) do
@@ -103,7 +119,7 @@ defmodule Matrx.API do
 
   @impl Matrx.APIBehaviour
   def join_room(session, room_id) do
-    case Req.post(url(session, ["_matrix", "client", "v3", "rooms", room_id, "join"]),
+    case request(:post, url(session, ["_matrix", "client", "v3", "rooms", room_id, "join"]),
            headers: headers(session)
          ) do
       {:ok, %{status: 200}} ->
@@ -119,7 +135,7 @@ defmodule Matrx.API do
 
   @impl Matrx.APIBehaviour
   def leave_room(session, room_id) do
-    case Req.post(url(session, ["_matrix", "client", "v3", "rooms", room_id, "leave"]),
+    case request(:post, url(session, ["_matrix", "client", "v3", "rooms", room_id, "leave"]),
            headers: headers(session)
          ) do
       {:ok, %{status: 200}} ->
@@ -135,7 +151,7 @@ defmodule Matrx.API do
 
   @impl Matrx.APIBehaviour
   def kick_room(session, room_id, payload) do
-    case Req.post(url(session, ["_matrix", "client", "v3", "rooms", room_id, "kick"]),
+    case request(:post, url(session, ["_matrix", "client", "v3", "rooms", room_id, "kick"]),
            headers: headers(session),
            json: payload
          ) do
@@ -152,7 +168,8 @@ defmodule Matrx.API do
 
   @impl Matrx.APIBehaviour
   def send_room_message(session, room_id, transaction_id, type, message) do
-    case Req.put(
+    case request(
+           :put,
            url(session, [
              "_matrix",
              "client",
@@ -184,7 +201,7 @@ defmodule Matrx.API do
   def upload_media(session, data, content_type, filename \\ nil) do
     query = if filename, do: [filename: filename]
 
-    case Req.post(url(session, ["_matrix", "media", "v3", "upload"], query),
+    case request(:post, url(session, ["_matrix", "media", "v3", "upload"], query),
            headers: [{"content-type", content_type} | headers(session)],
            body: data,
            receive_timeout: 300_000
@@ -208,7 +225,8 @@ defmodule Matrx.API do
   def send_to_device(session, transaction_id, message) do
     {type, message} = Map.pop(message, "type", "m.room.encrypted")
 
-    case Req.put(
+    case request(
+           :put,
            url(session, [
              "_matrix",
              "client",
@@ -233,7 +251,8 @@ defmodule Matrx.API do
 
   @impl Matrx.APIBehaviour
   def upload_keys(session, keys) do
-    case Req.post(
+    case request(
+           :post,
            url(session, [
              "_matrix",
              "client",
@@ -257,7 +276,8 @@ defmodule Matrx.API do
 
   @impl Matrx.APIBehaviour
   def keys_query(session, query) do
-    case Req.post(
+    case request(
+           :post,
            url(session, [
              "_matrix",
              "client",
@@ -285,7 +305,8 @@ defmodule Matrx.API do
   """
   @impl Matrx.APIBehaviour
   def upload_signing_keys(session, body) do
-    case Req.post(
+    case request(
+           :post,
            url(session, ["_matrix", "client", "v3", "keys", "device_signing", "upload"]),
            headers: headers(session),
            json: body
@@ -307,7 +328,8 @@ defmodule Matrx.API do
   @doc "Upload signatures of keys and devices. Returns the `failures` of the response."
   @impl Matrx.APIBehaviour
   def upload_signatures(session, body) do
-    case Req.post(
+    case request(
+           :post,
            url(session, ["_matrix", "client", "v3", "keys", "signatures", "upload"]),
            headers: headers(session),
            json: body
@@ -326,7 +348,9 @@ defmodule Matrx.API do
   @doc "The devices of our account, as the server lists them"
   @impl Matrx.APIBehaviour
   def list_devices(session) do
-    case Req.get(url(session, ["_matrix", "client", "v3", "devices"]), headers: headers(session)) do
+    case request(:get, url(session, ["_matrix", "client", "v3", "devices"]),
+           headers: headers(session)
+         ) do
       {:ok, %{status: 200, body: %{"devices" => devices}}} -> {:ok, devices}
       {:ok, %{body: body}} -> {:error, Matrx.APIError.from_json(body)}
       {:error, reason} -> {:error, reason}
@@ -339,7 +363,7 @@ defmodule Matrx.API do
   """
   @impl Matrx.APIBehaviour
   def delete_devices(session, body) do
-    case Req.post(url(session, ["_matrix", "client", "v3", "delete_devices"]),
+    case request(:post, url(session, ["_matrix", "client", "v3", "delete_devices"]),
            headers: headers(session),
            json: body
          ) do
@@ -359,7 +383,8 @@ defmodule Matrx.API do
 
   @impl Matrx.APIBehaviour
   def claim_keys(session, claim) do
-    case Req.post(
+    case request(
+           :post,
            url(session, [
              "_matrix",
              "client",
@@ -383,7 +408,8 @@ defmodule Matrx.API do
 
   @impl Matrx.APIBehaviour
   def user_directory_search(session, payload) do
-    case Req.post(
+    case request(
+           :post,
            url(session, [
              "_matrix",
              "client",
@@ -407,7 +433,8 @@ defmodule Matrx.API do
 
   @impl Matrx.APIBehaviour
   def sync(session, query \\ nil) do
-    case Req.get(
+    case request(
+           :get,
            url(
              session,
              [
@@ -435,6 +462,85 @@ defmodule Matrx.API do
 
   defp sync_timeout(nil), do: :timer.seconds(5)
   defp sync_timeout(timeout), do: timeout + :timer.seconds(5)
+
+  defp request(method, url, opts) do
+    config = Application.get_env(:matrx, __MODULE__, [])
+
+    Req.request(
+      Keyword.merge(opts,
+        method: method,
+        url: url,
+        retry: &retry/2,
+        max_retries: Keyword.get(config, :max_retries, 3)
+      )
+    )
+  end
+
+  defp retry(request, %Req.Response{} = response) do
+    body = retry_body(response.body)
+
+    if response.status == 429 or match?(%{"errcode" => "M_LIMIT_EXCEEDED"}, body) do
+      delay =
+        retry_after(response) || retry_after_ms(body) ||
+          Integer.pow(2, Req.Request.get_private(request, :req_retry_count, 0)) * 1000
+
+      {:delay, delay}
+    else
+      transient_retry?(request, response)
+    end
+  end
+
+  defp retry(request, exception), do: transient_retry?(request, exception)
+
+  # Preserve Req's default :safe_transient policy outside Matrix rate limits.
+  defp transient_retry?(%{method: method}, result) when method in [:get, :head] do
+    case result do
+      %Req.Response{status: status} ->
+        status in [408, 500, 502, 503, 504]
+
+      %Req.TransportError{reason: reason} ->
+        reason in [:timeout, :econnrefused, :closed]
+
+      %Req.HTTPError{protocol: :http2, reason: reason} ->
+        reason in [:unprocessed, :pool_not_available]
+
+      _ ->
+        false
+    end
+  end
+
+  defp transient_retry?(_request, _result), do: false
+
+  # Req runs its retry step before decoding JSON response bodies.
+  defp retry_body(body) when is_binary(body) do
+    :json.decode(body)
+  rescue
+    ErlangError -> nil
+  end
+
+  defp retry_body(body), do: body
+
+  defp retry_after_ms(%{"retry_after_ms" => delay}) when is_integer(delay) and delay >= 0,
+    do: delay
+
+  defp retry_after_ms(_body), do: nil
+
+  defp retry_after(response) do
+    case Req.Response.get_header(response, "retry-after") do
+      [value] ->
+        case Integer.parse(value) do
+          {seconds, ""} when seconds >= 0 -> :timer.seconds(seconds)
+          :error -> Req.Response.get_retry_after(response)
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  rescue
+    # An invalid header should fall back to the Matrix delay or backoff.
+    _ in [ArgumentError, MatchError, FunctionClauseError] -> nil
+  end
 
   defp url(session, path, query \\ nil) do
     base = %{session.home_server_uri | path: "/" <> Enum.join(path, "/")}

@@ -51,7 +51,10 @@ defmodule Matrx.Crypto.RoomMessagesTest do
   end
 
   defp payload(type, content, room_id \\ @room_id),
-    do: Jason.encode!(%{"type" => type, "content" => content, "room_id" => room_id})
+    do:
+      %{"type" => type, "content" => content, "room_id" => room_id}
+      |> :json.encode()
+      |> IO.iodata_to_binary()
 
   defp text(body), do: payload("m.room.message", %{"msgtype" => "m.text", "body" => body})
 

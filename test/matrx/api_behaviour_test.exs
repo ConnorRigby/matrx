@@ -14,7 +14,7 @@ defmodule Matrx.APIBehaviourTest do
   test "error bodies that are not Matrix errors still parse" do
     assert %Matrx.APIError{errcode: :m_unknown} = Matrx.APIError.from_json("<html>502</html>")
 
-    assert %Matrx.APIError{errcode: "M_LIMIT_EXCEEDED"} =
+    assert %Matrx.APIError{errcode: :m_limit_exceeded} =
              Matrx.APIError.from_json(%{"errcode" => "M_LIMIT_EXCEEDED", "error" => "slow down"})
   end
 

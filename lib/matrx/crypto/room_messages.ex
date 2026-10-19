@@ -93,17 +93,19 @@ defmodule Matrx.Crypto.RoomMessages do
   end
 
   defp parse_payload(plaintext, room_id) do
-    case Jason.decode(plaintext) do
-      {:ok, %{"type" => type, "content" => %{}, "room_id" => ^room_id} = payload}
+    case :json.decode(plaintext) do
+      %{"type" => type, "content" => %{}, "room_id" => ^room_id} = payload
       when is_binary(type) ->
         {:ok, payload}
 
-      {:ok, %{"room_id" => other}} when other != room_id ->
+      %{"room_id" => other} when other != room_id ->
         {:error, :room_mismatch}
 
       _ ->
         {:error, :invalid_payload}
     end
+  rescue
+    ErlangError -> {:error, :invalid_payload}
   end
 
   # An index may be decrypted again for the same event, but never for another one

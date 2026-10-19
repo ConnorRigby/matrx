@@ -14,6 +14,8 @@ config :matrx, Matrx.Repo,
   database: database,
   pool_size: 1
 
+config :matrx, Matrx.API, max_retries: 3
+
 if Mix.env() == :test do
   config :matrx, Matrx.Repo,
     database: "test.db",

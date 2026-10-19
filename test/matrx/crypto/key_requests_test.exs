@@ -280,11 +280,13 @@ defmodule Matrx.Crypto.KeyRequestsTest do
 
     defp message_event(ctx) do
       plaintext =
-        Jason.encode!(%{
+        %{
           "type" => "m.room.message",
           "content" => %{"msgtype" => "m.text", "body" => "old news"},
           "room_id" => @room_id
-        })
+        }
+        |> :json.encode()
+        |> IO.iodata_to_binary()
 
       {:ok, _, ciphertext} = Megolm.encrypt(ctx.outbound, plaintext)
 

@@ -44,14 +44,15 @@ defmodule Matrx.Room do
   Send an event to the room, encrypting it if the room is encrypted.
 
   Sends are handled one at a time by the room process, so two sends can't create
-  two Megolm sessions. Options: `:api`.
+  two Megolm sessions. The call waits for uploads and server-directed rate-limit
+  delays rather than timing out while a send is still in progress. Options: `:api`.
   """
   @spec send_event(room_id(), Matrx.Session.t(), String.t(), map(), keyword()) ::
           {:ok, %{event_id: String.t()}} | {:error, term()}
   def send_event(room_id, session, type, content, opts \\ []) do
     case Matrx.RoomSupervisor.whereis(room_id) do
       nil -> {:error, :unknown_room}
-      room_pid -> GenServer.call(room_pid, {:send_event, session, type, content, opts}, 60_000)
+      room_pid -> GenServer.call(room_pid, {:send_event, session, type, content, opts}, :infinity)
     end
   end
 

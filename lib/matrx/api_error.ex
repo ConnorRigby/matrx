@@ -1,5 +1,5 @@
 defmodule Matrx.APIError do
-  defstruct [:errcode, :error]
+  defstruct [:errcode, :error, :retry_after_ms]
 
   @type errcode ::
           :m_forbidden
@@ -12,8 +12,23 @@ defmodule Matrx.APIError do
           | :m_invalid_username
           | :m_unknown_token
           | :m_too_large
+          | :m_limit_exceeded
           | String.t()
-  @type t :: %__MODULE__{errcode: errcode, error: String.t()}
+  @type t :: %__MODULE__{
+          errcode: errcode,
+          error: String.t() | nil,
+          retry_after_ms: non_neg_integer() | nil
+        }
+
+  def from_json(%{"errcode" => "M_LIMIT_EXCEEDED"} = body) do
+    delay = body["retry_after_ms"]
+
+    %__MODULE__{
+      errcode: :m_limit_exceeded,
+      error: body["error"],
+      retry_after_ms: if(is_integer(delay) and delay >= 0, do: delay)
+    }
+  end
 
   def from_json(%{"errcode" => "M_FORBIDDEN", "error" => error}) do
     %__MODULE__{errcode: :m_forbidden, error: error}

@@ -62,11 +62,13 @@ defmodule Matrx.SyncLongPollEncryptionTest do
 
   defp message_event(ctx, body) do
     plaintext =
-      Jason.encode!(%{
+      %{
         "type" => "m.room.message",
         "content" => %{"msgtype" => "m.text", "body" => body},
         "room_id" => ctx.room_id
-      })
+      }
+      |> :json.encode()
+      |> IO.iodata_to_binary()
 
     {:ok, _, ciphertext} = Megolm.encrypt(ctx.outbound, plaintext)
 

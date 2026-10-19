@@ -55,7 +55,9 @@ defmodule Matrx.Crypto.RoomEncryption do
       with {:ok, outbound} <- current_session(session, room_id, encryption, recipients),
            :ok <- share_key(session, outbound, room_id, recipients, api),
            plaintext =
-             Jason.encode!(%{"type" => type, "content" => content, "room_id" => room_id}),
+             %{"type" => type, "content" => content, "room_id" => room_id}
+             |> :json.encode()
+             |> IO.iodata_to_binary(),
            {:ok, _outbound, ciphertext} <- Megolm.encrypt(outbound, plaintext) do
         {:ok,
          %{
