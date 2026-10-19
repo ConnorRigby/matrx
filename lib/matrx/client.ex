@@ -24,6 +24,8 @@ defmodule Matrx.Client do
     * `:username` (required): localpart of the bot's user
     * `:password`: only needed when there is no stored device for this user yet
     * `:new_device`: log in again even if a device is stored, default `false`
+    * `:auto_join`: join rooms the bot is invited to: `true`, or a function taking
+      the `Matrx.Invite` and returning whether to join. Default `false`.
     * `:ignore_own`, `:task_supervisor`: passed to the consumer
     * `:migrate`: bring the local database up to date first, default `true`
     * `:api`: the API module, default `Matrx.API`
@@ -36,7 +38,8 @@ defmodule Matrx.Client do
   from starting, as with an unreachable database. Once started, the sync loop
   and the consumer are restarted by this supervisor if they crash.
 
-  The bot has to be in its rooms already. Invites are not handled.
+  Invites reach the handler as `:room_invite` events. Use `:auto_join` to accept
+  them, for example `auto_join: &(&1.inviter == "@admin:example.com")`.
   """
 
   use Supervisor
@@ -84,7 +87,9 @@ defmodule Matrx.Client do
   @impl Supervisor
   def init({session, opts}) do
     api_opts = Keyword.take(opts, [:api])
-    consumer_opts = Keyword.take(opts, [:handler, :ignore_own, :task_supervisor])
+
+    consumer_opts =
+      Keyword.take(opts, [:handler, :ignore_own, :task_supervisor, :auto_join, :api])
 
     children = [
       %{

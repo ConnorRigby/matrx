@@ -2,6 +2,8 @@ defmodule Matrx.API.Sync.Rooms.StrippedStateEvent do
   alias Matrx.API.Event
   defstruct [:content, :sender, :state_key, :type]
 
+  @type t :: %__MODULE__{}
+
   def from_response(stripped_state_event) do
     type = stripped_state_event["type"]
     content = stripped_state_event["content"]

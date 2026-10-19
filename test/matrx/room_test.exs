@@ -43,14 +43,16 @@ defmodule Matrx.RoomTest do
               %Matrx.API.Event.RoomMember{
                 avatar_url: "mxc://example.org/SEsfnsuifSDFSSEF",
                 displayname: "Alice",
-                membership: :join
+                membership: :join,
+                is_direct: false
               }} in members
 
       assert {"@bob:example.org",
               %Matrx.API.Event.RoomMember{
                 avatar_url: "mxc://example.org/SEsfnsuifSDFSSEF",
                 displayname: "Bob",
-                membership: :join
+                membership: :join,
+                is_direct: false
               }} in members
     end
   end

@@ -29,14 +29,16 @@ defmodule Matrx.Room.TimelineTest do
             %Matrx.API.Event.RoomMember{
               avatar_url: "mxc://example.org/SEsfnsuifSDFSSEF",
               displayname: "Alice",
-              membership: :join
+              membership: :join,
+              is_direct: false
             }} in members
 
     assert {"@bob:example.org",
             %Matrx.API.Event.RoomMember{
               avatar_url: "mxc://example.org/SEsfnsuifSDFSSEF",
               displayname: "Bob",
-              membership: :join
+              membership: :join,
+              is_direct: false
             }} in members
   end
 
@@ -55,7 +57,8 @@ defmodule Matrx.Room.TimelineTest do
               %Matrx.API.Event.RoomMember{
                 avatar_url: "mxc://example.org/SEsfnsuifSDFSSEF",
                 displayname: "Alice",
-                membership: :join
+                membership: :join,
+                is_direct: false
               }},
              {{"m.room.create", ""},
               %Matrx.API.Event.RoomCreate{creator: nil, room_version: "11"}},
@@ -63,7 +66,8 @@ defmodule Matrx.Room.TimelineTest do
               %Matrx.API.Event.RoomMember{
                 avatar_url: "mxc://example.org/SEsfnsuifSDFSSEF",
                 displayname: "Bob",
-                membership: :join
+                membership: :join,
+                is_direct: false
               }}
            ] = Timeline.dump_state(timeline)
   end

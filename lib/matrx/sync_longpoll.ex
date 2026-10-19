@@ -6,6 +6,8 @@ defmodule Matrx.SyncLongPoll do
   alias Matrx.Room
   alias Matrx.Crypto.{Devices, KeyRequests, RoomMessages, ToDevice}
 
+  @key_request_delay_ms :timer.seconds(5)
+
   @doc """
   Start a sync session
   """
@@ -33,7 +35,7 @@ defmodule Matrx.SyncLongPoll do
       # encrypted events waiting for their room key, as {room_id, event}
       pending: [],
       # how long an event waits for its key to arrive on its own before we ask for it
-      key_request_delay: Keyword.get(args, :key_request_delay, 5_000),
+      key_request_delay: Keyword.get(args, :key_request_delay, @key_request_delay_ms),
       key_request_timer: nil,
       awaiting_sync: nil
     }
@@ -181,7 +183,7 @@ defmodule Matrx.SyncLongPoll do
     touched = Map.keys(rooms.join || %{}) ++ Map.keys(rooms.leave || %{})
     before = state_members_before(state, touched)
 
-    if rooms.invite, do: Enum.each(rooms.invite, sync_fun.(&Room.sync_invite/2))
+    if rooms.invite, do: broadcast_invites(state, rooms.invite)
     if rooms.join, do: Enum.each(rooms.join, sync_fun.(&Room.sync_join/2))
     if rooms.knock, do: Enum.each(rooms.knock, sync_fun.(&Room.sync_knock/2))
     if rooms.leave, do: Enum.each(rooms.leave, sync_fun.(&Room.sync_leave/2))
@@ -191,6 +193,14 @@ defmodule Matrx.SyncLongPoll do
 
     {:noreply, state, {:continue, next}}
   end
+
+  defp broadcast_invites(%{session: %Matrx.Session{user_id: user_id}}, invites) do
+    Enum.each(invites, fn {room_id, invited} ->
+      Room.broadcast_invite(user_id, room_id, invited)
+    end)
+  end
+
+  defp broadcast_invites(_state, _invites), do: :ok
 
   @max_pending 500
 

@@ -75,12 +75,21 @@ defmodule Matrx.Room do
     Phoenix.PubSub.broadcast(Matrx.PubSub, @events_topic, {:room_event, room_id, event})
   end
 
+  @doc """
+  Publish an invite of `user_id` on the events topic as
+  `{:room_invite, user_id, room_id, %InvitedRoom{}}`. Invites don't start a room
+  process, as the user hasn't joined.
+  """
+  def broadcast_invite(user_id, room_id, invited_room) do
+    Phoenix.PubSub.broadcast(
+      Matrx.PubSub,
+      @events_topic,
+      {:room_invite, user_id, room_id, invited_room}
+    )
+  end
+
   @doc "PubSub topic carrying the events of every room"
   def events_topic, do: @events_topic
-
-  def sync_invite(room_pid, invite) when is_pid(room_pid) do
-    GenServer.cast(room_pid, {:sync_invite, invite})
-  end
 
   def sync_join(room_pid, join) when is_pid(room_pid) do
     GenServer.cast(room_pid, {:sync_join, join})
@@ -142,11 +151,6 @@ defmodule Matrx.Room do
   end
 
   @impl GenServer
-  def handle_cast({:sync_invite, invite}, state) do
-    Logger.error(":sync_invite not implemented: #{inspect(invite)}")
-    {:noreply, state}
-  end
-
   def handle_cast({:sync_join, join}, state) do
     handle_timeline(join, state)
   end

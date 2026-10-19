@@ -1,10 +1,11 @@
 defmodule Matrx.API.Event.RoomMember do
-  defstruct [:avatar_url, :displayname, :membership]
+  defstruct [:avatar_url, :displayname, :membership, :is_direct]
 
   def from_response(content) do
     %__MODULE__{
       avatar_url: content["avatar_url"],
       displayname: content["displayname"],
+      is_direct: content["is_direct"] == true,
       membership: membership_from_response(content["membership"])
     }
   end
