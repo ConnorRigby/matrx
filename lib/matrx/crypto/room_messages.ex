@@ -112,22 +112,26 @@ defmodule Matrx.Crypto.RoomMessages do
   defp check_replay(inbound, index, event) do
     key = [session_id: inbound.session_id, message_index: index]
 
-    case Repo.get_by(MessageIndex, key) do
-      nil ->
-        Repo.insert!(%MessageIndex{
+    Repo.insert_all(
+      MessageIndex,
+      [
+        %{
           session_id: inbound.session_id,
           message_index: index,
           event_id: event.event_id,
-          origin_server_ts: event.origin_server_ts
-        })
+          origin_server_ts: event.origin_server_ts,
+          inserted_at: NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+        }
+      ],
+      on_conflict: :nothing,
+      conflict_target: [:session_id, :message_index]
+    )
 
-        :ok
+    %{event_id: id, origin_server_ts: ts} = Repo.get_by!(MessageIndex, key)
 
-      %{event_id: id, origin_server_ts: ts} ->
-        if id == event.event_id and ts == event.origin_server_ts,
-          do: :ok,
-          else: {:error, :replayed}
-    end
+    if id == event.event_id and ts == event.origin_server_ts,
+      do: :ok,
+      else: {:error, :replayed}
   end
 
   defp rebuild(event, payload) do

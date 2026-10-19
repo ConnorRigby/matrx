@@ -31,6 +31,7 @@ defmodule Matrx.Session do
           user_id: String.t(),
           device_id: String.t(),
           access_token: String.t(),
+          sync_token: String.t() | nil,
           account_id: Ecto.UUID.t(),
           account: Account.t() | Ecto.Association.NotLoaded.t(),
           inserted_at: DateTime.t(),
@@ -44,6 +45,7 @@ defmodule Matrx.Session do
     field :user_id, :string
     field :device_id, :string
     field :access_token, :string
+    field :sync_token, :string
     belongs_to :account, Account, type: :binary_id
     has_many :devices, Matrx.Crypto.Device
     has_many :tracked_users, Matrx.Crypto.TrackedUser
@@ -53,6 +55,7 @@ defmodule Matrx.Session do
     has_many :megolm_inbound_sessions, Matrx.Megolm.InboundSession, foreign_key: :owner_id
     has_many :megolm_outbound_sessions, Matrx.Megolm.OutboundSession, foreign_key: :owner_id
     has_many :megolm_key_requests, Matrx.Megolm.KeyRequest, foreign_key: :owner_id
+    has_many :sync_deliveries, Matrx.SyncDelivery, foreign_key: :owner_id
     timestamps()
   end
 

@@ -60,6 +60,7 @@ defmodule Matrx.ClientTest do
     session = Client.session(client)
     assert session.user_id == "@bot:#{ctx.host}"
 
+    FakeAPI.push_sync(ctx.feed, %{"next_batch" => "baseline"})
     FakeAPI.push_sync(ctx.feed, room_with_message("!r:#{ctx.host}", "hello bot"))
 
     assert_receive {:handled, {:message_create, %Message{body: "hello bot"}, c}}, 2000

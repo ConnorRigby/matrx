@@ -8,6 +8,7 @@ defmodule Matrx.MixProject do
       elixir: "~> 1.20",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
+      dialyzer: [plt_add_apps: [:mix]],
       deps: deps(),
       aliases: aliases()
     ]

@@ -22,7 +22,9 @@ defmodule Matrx.Dev do
   syncing. Returns the session.
 
   Options: `:password` (default `MATRIX_PASSWORD`), `:new_device` to force a
-  fresh login, and `:api`.
+  fresh login, `:initial_history` (default `false`, skips the first history
+  batch for a new local session), and `:api`. Later starts resume from the
+  stored sync token.
   """
   @spec connect(String.t(), String.t(), keyword()) :: Session.t()
   def connect(homeserver, username, opts \\ []) do
@@ -33,11 +35,20 @@ defmodule Matrx.Dev do
     session
   end
 
-  @doc "(Re)start the sync loop for a session, stopping any previous one"
+  @doc """
+  (Re)start the Dev sync loop for a session, stopping any previous Dev loop.
+  Options: `:api` and `:initial_history` (default `false`).
+  """
   @spec start_sync(Session.t(), keyword()) :: pid()
   def start_sync(session, opts \\ []) do
     stop_sync()
-    args = [session: session] ++ Keyword.take(opts, [:api])
+
+    args =
+      [session: session] ++
+        (opts
+         |> Keyword.take([:api, :initial_history])
+         |> Keyword.put_new(:initial_history, false))
+
     {:ok, pid} = SyncLongPoll.start_link(args, name: @sync_name)
     # a crash in sync shouldn't take the IEx shell down with it
     Process.unlink(pid)

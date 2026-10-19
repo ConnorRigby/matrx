@@ -41,7 +41,8 @@ defmodule Matrx.Support.FakeAPI do
            device_keys: %{},
            signing_keys: %{},
            uia_password: nil,
-           failures: %{}
+           failures: %{},
+           profiles: %{}
          }}
 
     @impl true
@@ -123,6 +124,16 @@ defmodule Matrx.Support.FakeAPI do
     def handle_call({:notify, message}, _from, state) do
       send(state.owner, message)
       {:reply, :ok, state}
+    end
+
+    def handle_call({:get_profile, user_id}, _from, state) do
+      {:reply, {:ok, Map.get(state.profiles, user_id, %{})}, state}
+    end
+
+    def handle_call({:put_profile, user_id, field, value}, _from, state) do
+      profile = Map.get(state.profiles, user_id, %{}) |> Map.put(field, value)
+      send(state.owner, {:put_profile, user_id, field, value})
+      {:reply, :ok, %{state | profiles: Map.put(state.profiles, user_id, profile)}}
     end
 
     def handle_call({:upload_media, data, content_type, filename}, _from, state) do
@@ -256,9 +267,13 @@ defmodule Matrx.Support.FakeAPI do
       {:noreply, %{state | queue: :queue.in(sync, state.queue)}}
     end
 
-    def handle_cast({:push, sync}, %{waiter: waiter} = state) do
-      GenServer.reply(waiter, sync)
-      {:noreply, %{state | waiter: nil}}
+    def handle_cast({:push, sync}, %{waiter: {pid, _} = waiter} = state) do
+      if Process.alive?(pid) do
+        GenServer.reply(waiter, sync)
+        {:noreply, %{state | waiter: nil}}
+      else
+        {:noreply, %{state | waiter: nil, queue: :queue.in(sync, state.queue)}}
+      end
     end
   end
 
@@ -273,7 +288,8 @@ defmodule Matrx.Support.FakeAPI do
   end
 
   @impl Matrx.APIBehaviour
-  def sync(session, _query) do
+  def sync(session, query) do
+    :ok = GenServer.call(feed(session), {:notify, {:sync_query, query}})
     {:ok, GenServer.call(feed(session), :poll, :infinity)}
   end
 
@@ -396,6 +412,18 @@ defmodule Matrx.Support.FakeAPI do
   end
 
   defp notify(session, message), do: GenServer.call(feed(session), {:notify, message})
+
+  @impl Matrx.APIBehaviour
+  def get_profile(session, user_id),
+    do: GenServer.call(feed(session), {:get_profile, user_id})
+
+  @impl Matrx.APIBehaviour
+  def set_display_name(session, name),
+    do: GenServer.call(feed(session), {:put_profile, session.user_id, "displayname", name})
+
+  @impl Matrx.APIBehaviour
+  def set_avatar_url(session, uri),
+    do: GenServer.call(feed(session), {:put_profile, session.user_id, "avatar_url", uri})
 
   defp login(%{home_server_uri: %URI{host: host}}, username, device_id) do
     %{

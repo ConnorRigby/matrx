@@ -62,6 +62,11 @@ defmodule Matrx.APIRetryTest do
     }
 
     calls = [
+      {fn -> API.get_profile(@session, "@bot:example") end, %{"displayname" => "Bot"}},
+      {fn -> API.set_display_name(Map.put(@session, :user_id, "@bot:example"), "Bot") end, %{}},
+      {fn ->
+         API.set_avatar_url(Map.put(@session, :user_id, "@bot:example"), "mxc://example/a")
+       end, %{}},
       {fn -> API.register(@session, %{username: "bot", password: "pw"}) end, login},
       {fn -> API.login_password(@session, %{type: "m.id.user", user: "bot"}, "pw") end, login},
       {fn -> API.whoami(@session) end, login},
@@ -105,6 +110,26 @@ defmodule Matrx.APIRetryTest do
     assert_receive {:attempt, 1, before, _}
     assert_receive {:attempt, 2, after_retry, _}
     assert after_retry - before >= 40
+  end
+
+  test "profile updates use authenticated PUTs with encoded user IDs and correct fields" do
+    session = Map.put(@session, :user_id, "@bot/a:example")
+
+    for {call, field, value} <- [
+          {fn -> API.set_display_name(session, "Böt") end, "displayname", "Böt"},
+          {fn -> API.set_avatar_url(session, "") end, "avatar_url", ""}
+        ] do
+      stub([response(200, %{})])
+      assert :ok = call.()
+      assert_receive {:attempt, 1, _, request}
+      assert request.method == :put
+      assert request.url.path == "/_matrix/client/v3/profile/%40bot%2Fa%3Aexample/#{field}"
+      assert :json.decode(IO.iodata_to_binary(request.body)) == %{field => value}
+      assert Req.Request.get_header(request, "authorization") == ["Bearer token"]
+    end
+
+    stub([response(403, %{"errcode" => "M_FORBIDDEN", "error" => "Denied"})])
+    assert {:error, %APIError{errcode: :m_forbidden}} = API.set_display_name(session, "Bot")
   end
 
   test "Retry-After takes precedence over the Matrix delay" do

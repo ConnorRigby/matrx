@@ -38,6 +38,38 @@ say(session, "!eiyZOmiCnUufWlRabT:matrix.example.com", "hello from elixir") # se
 
 ## Usage
 
+### Bootstrap a bot's verification
+
+For an already registered, matrix account, run:
+
+```sh
+mix matrx.verify --homeserver https://matrix.example.com --username mybot
+```
+
+Set `MATRIX_PASSWORD` in the environment, or configure `:password` under
+`config :matrx, Matrx.Client`.
+It logs in, creates the cross-signing identity, and signs the device without
+starting your bot application or syncing rooms.
+
+### Set the bot's profile
+
+```sh
+mix matrx.profile --display-name "My Bot" --avatar ./avatar.png
+# Or reuse an uploaded image:
+mix matrx.profile --avatar-url mxc://matrix.example.com/media-id
+# View the current profile:
+mix matrx.profile
+# Clear either field:
+mix matrx.profile --display-name "" --avatar-url ""
+```
+
+Credentials and database selection work like `mix matrx.verify`. Use
+`--homeserver` and `--username` to override the client config. Avatar files are
+uploaded unencrypted as public profile media; MIME type is inferred from the
+extension, or supplied with `--content-type image/png`. Only supplied fields
+are changed. Changes are separate requests, so failures do not roll back an
+earlier change. See `mix help matrx.profile`.
+
 Pragmatic usage for example to create a simple bot:
 
 ```elixir
@@ -56,14 +88,34 @@ end
 In your applications supervision tree add: 
 
 ```elixir
-session = Matrx.Dev.connect("https://matrix.example.com", "username")
 children = [
-  {Matrx.SyncLongPoll, session: session},
-  {Matrx.Consumer, handler: MyBot, session: session}
+  {Matrx.Client,
+   handler: MyBot,
+   homeserver: "https://matrix.example.com",
+   username: "mybot",
+   password: System.get_env("MATRIX_PASSWORD")}
 ]
 
 Supervisor.start_link(children, strategy: :one_for_one)
 ```
+
+`Matrx.Client` starts the consumer before its single sync loop. Do not combine
+`Matrx.Dev.connect/3` and a Client process at the same time. this will fail.
+
+By default, Client and Dev skip message history in the first sync for a local
+session, but still process room state and invites. A persisted sync token lets
+later restarts receive messages sent while the bot was offline. Set
+`initial_history: true` to deliver that first history batch. The low-level
+`Matrx.SyncLongPoll` interface retains `initial_history: true` by default.
+Resumed syncs request full room state to rebuild the in-memory room cache.
+
+Timeline event IDs are recorded per session before publication, so repeated
+syncs do not repeatedly redeliver messages. An undecryptable message may still
+be delivered once more when its key arrives. This is not exactly-once handler
+execution: a crash between recording an event and completing its handler can
+lose that delivery. Handlers needing stronger guarantees should durably queue
+and acknowledge their own messages. Sync checkpoints are saved after batch
+processing, and held back while room keys are missing.
 
 ## Getting Help
 

@@ -5,11 +5,14 @@ defmodule Matrx.SyncLongPoll do
   alias Matrx.RoomSupervisor
   alias Matrx.Room
   alias Matrx.Crypto.{Devices, KeyRequests, RoomMessages, ToDevice}
+  alias Matrx.{Repo, Session, SyncDelivery}
 
   @key_request_delay_ms :timer.seconds(5)
 
   @doc """
-  Start a sync session
+  Start a sync session. Only one sync process may own a stored session at a
+  time. `:initial_history` defaults to `true` for this low-level interface;
+  `Matrx.Client` and `Matrx.Dev` default to `false` for bot usage.
   """
   @spec start_link([{:session, Matrx.Session.t()}], GenServer.options()) :: GenServer.on_start()
   def start_link(args, opts \\ []) do
@@ -22,15 +25,39 @@ defmodule Matrx.SyncLongPoll do
 
   @impl GenServer
   def init(args) do
-    server = self()
+    Process.flag(:trap_exit, true)
     session = Keyword.fetch!(args, :session)
+
+    case register_session(session) do
+      :ok -> init_sync(args, session)
+      {:error, pid} -> {:stop, {:already_syncing, pid}}
+    end
+  end
+
+  defp register_session(%Session{id: id}) do
+    case Registry.register(Matrx.SyncRegistry, id, nil) do
+      {:ok, _} -> :ok
+      {:error, {:already_registered, pid}} -> {:error, pid}
+    end
+  end
+
+  defp register_session(_session), do: :ok
+
+  defp init_sync(args, session) do
+    server = self()
     api = Keyword.get(args, :api, Matrx.API)
-    sync = spawn_monitor(fn -> sync_process(server, api, session) end)
+    token = if match?(%Session{}, session), do: Repo.get!(Session, session.id).sync_token
+    query = if token, do: %{since: token, full_state: true}
+
+    sync =
+      :erlang.spawn_opt(fn -> sync_process(server, api, session, query) end, [:link, :monitor])
 
     state = %{
       session: session,
       api: api,
       sync: sync,
+      next_batch: nil,
+      suppress_history: is_nil(token) and not Keyword.get(args, :initial_history, true),
       one_time_key_counts: nil,
       # encrypted events waiting for their room key, as {room_id, event}
       pending: [],
@@ -50,6 +77,16 @@ defmodule Matrx.SyncLongPoll do
   end
 
   @impl GenServer
+  def terminate(_reason, %{sync: {pid, _}}) do
+    Process.exit(pid, :shutdown)
+    :ok
+  end
+
+  def terminate(_reason, _state), do: :ok
+
+  @impl GenServer
+  def handle_info({:EXIT, pid, _reason}, %{sync: {pid, _}} = state), do: {:noreply, state}
+
   def handle_info({:DOWN, mon, :process, pid, reason}, %{sync: {pid, mon}} = state)
       when reason in [:normal, :killed] do
     {:noreply, %{state | sync: nil}}
@@ -82,19 +119,37 @@ defmodule Matrx.SyncLongPoll do
 
     events = keys ++ account_data ++ presence ++ rooms ++ to_device ++ device_lists
     if state.awaiting_sync, do: GenServer.reply(state.awaiting_sync, sync)
-    state = %{state | one_time_key_counts: sync.device_one_time_keys_count, awaiting_sync: nil}
+
+    state = %{
+      state
+      | one_time_key_counts: sync.device_one_time_keys_count,
+        awaiting_sync: nil,
+        next_batch: sync.next_batch
+    }
 
     if length(events) > 0 do
       {:noreply, state, {:continue, events}}
     else
       Logger.warning("sync has no events")
-      {:noreply, state, :hibernate}
+      handle_continue([], state)
     end
   end
 
   @impl GenServer
   def handle_continue([], state) do
-    {:noreply, state, :hibernate}
+    if match?(%Session{}, state.session) and state.pending == [] and
+         is_binary(state.next_batch) do
+      state.session
+      |> Ecto.Changeset.change(sync_token: state.next_batch)
+      |> Repo.update!()
+    end
+
+    if state.sync do
+      {pid, _} = state.sync
+      send(pid, {:sync_processed, state.next_batch})
+    end
+
+    {:noreply, %{state | suppress_history: false}, :hibernate}
   end
 
   def handle_continue([{:replenish_keys, counts} | next], state) do
@@ -173,9 +228,11 @@ defmodule Matrx.SyncLongPoll do
       fn {room_id, data} ->
         with {:ok, room_pid} <- RoomSupervisor.start_room(room_id) do
           :ok = inner.(room_pid, data)
+          # Wait for the preceding cast before acknowledging this sync batch.
+          Room.dump_state(room_pid)
         else
           {:error, reason} ->
-            Logger.error("Failed to get room: #{inspect(reason)}")
+            raise "Failed to get room #{room_id}: #{inspect(reason)}"
         end
       end
     end
@@ -217,9 +274,30 @@ defmodule Matrx.SyncLongPoll do
   defp decrypt_room_map(rooms, state) do
     Enum.reduce(rooms, {%{}, state}, fn {room_id, room}, {acc, state} ->
       {events, state} =
-        Enum.map_reduce(room.timeline.events, state, &decrypt_event(room_id, &1, &2))
+        Enum.reduce(room.timeline.events, {[], state}, fn event, {events, state} ->
+          cond do
+            is_binary(event.state_key) ->
+              {[event | events], state}
 
-      {Map.put(acc, room_id, %{room | timeline: %{room.timeline | events: events}}), state}
+            state.suppress_history ->
+              if is_binary(event.event_id) do
+                SyncDelivery.claim(state.session, room_id, event, "clear")
+                SyncDelivery.claim(state.session, room_id, event, "encrypted")
+              end
+
+              {events, state}
+
+            true ->
+              {event, state} = decrypt_event(room_id, event, state)
+
+              if claim_delivery(state, room_id, event),
+                do: {[event | events], state},
+                else: {events, state}
+          end
+        end)
+
+      {Map.put(acc, room_id, %{room | timeline: %{room.timeline | events: Enum.reverse(events)}}),
+       state}
     end)
   end
 
@@ -246,6 +324,14 @@ defmodule Matrx.SyncLongPoll do
     |> schedule_key_request()
   end
 
+  defp claim_delivery(state, room_id, %{event_id: id} = event) when is_binary(id),
+    do: SyncDelivery.claim(state.session, room_id, event)
+
+  defp claim_delivery(_state, room_id, _event) do
+    Logger.warning("Ignoring timeline event without event_id in #{room_id}")
+    false
+  end
+
   defp schedule_key_request(%{key_request_timer: nil} = state) do
     timer = Process.send_after(self(), :request_missing_keys, state.key_request_delay)
     %{state | key_request_timer: timer}
@@ -261,7 +347,9 @@ defmodule Matrx.SyncLongPoll do
       Enum.filter(state.pending, fn {room_id, event} ->
         case RoomMessages.decrypt(state.session, room_id, event) do
           {:ok, decrypted} ->
-            Room.broadcast_event(room_id, decrypted)
+            if claim_delivery(state, room_id, decrypted),
+              do: Room.broadcast_event(room_id, decrypted)
+
             false
 
           {:error, :unknown_session} ->
@@ -354,14 +442,18 @@ defmodule Matrx.SyncLongPoll do
 
   defp replenish_keys?(_state, _sync), do: false
 
-  defp sync_process(parent, api, session, query \\ nil) do
+  defp sync_process(parent, api, session, query) do
     case api.sync(session, query) do
       {:ok, sync} ->
         send(parent, sync)
-        sync_process(parent, api, session, %{since: sync.next_batch, timeout: :timer.seconds(30)})
 
-      error ->
-        error
+        receive do
+          {:sync_processed, token} ->
+            sync_process(parent, api, session, %{since: token, timeout: :timer.seconds(30)})
+        end
+
+      {:error, reason} ->
+        exit({:sync_failed, reason})
     end
   end
 end

@@ -26,6 +26,8 @@ defmodule Matrx.Client do
     * `:new_device`: log in again even if a device is stored, default `false`
     * `:auto_join`: join rooms the bot is invited to: `true`, or a function taking
       the `Matrx.Invite` and returning whether to join. Default `false`.
+    * `:initial_history`: deliver the first timeline batch for a new local
+      session, default `false`. Later restarts resume from the stored sync token.
     * `:ignore_own`, `:task_supervisor`: passed to the consumer
     * `:migrate`: bring the local database up to date first, default `true`
     * `:api`: the API module, default `Matrx.API`
@@ -36,7 +38,9 @@ defmodule Matrx.Client do
   Login happens in `start_link/1`, so a wrong password or an unreachable
   homeserver makes it return `{:error, reason}`, which stops your application
   from starting, as with an unreachable database. Once started, the sync loop
-  and the consumer are restarted by this supervisor if they crash.
+  and the consumer are restarted by this supervisor if they crash. The consumer
+  starts first; if it crashes, sync restarts too, so polling never continues
+  indefinitely without a consumer.
 
   Invites reach the handler as `:room_invite` events. Use `:auto_join` to accept
   them, for example `auto_join: &(&1.inviter == "@admin:example.com")`.
@@ -86,23 +90,24 @@ defmodule Matrx.Client do
 
   @impl Supervisor
   def init({session, opts}) do
-    api_opts = Keyword.take(opts, [:api])
+    sync_opts =
+      opts |> Keyword.take([:api, :initial_history]) |> Keyword.put_new(:initial_history, false)
 
     consumer_opts =
       Keyword.take(opts, [:handler, :ignore_own, :task_supervisor, :auto_join, :api])
 
     children = [
       %{
-        id: SyncLongPoll,
-        start: {SyncLongPoll, :start_link, [[session: session] ++ api_opts]}
-      },
-      %{
         id: Consumer,
         start: {Consumer, :start_link, [[session: session] ++ consumer_opts]}
+      },
+      %{
+        id: SyncLongPoll,
+        start: {SyncLongPoll, :start_link, [[session: session] ++ sync_opts]}
       }
     ]
 
-    Supervisor.init(children, strategy: :one_for_one)
+    Supervisor.init(children, strategy: :rest_for_one)
   end
 
   defp validate(opts) do

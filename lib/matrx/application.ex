@@ -12,6 +12,7 @@ defmodule Matrx.Application do
       Matrx.Repo,
       {Task.Supervisor, name: Matrx.TaskSupervisor},
       {Registry, keys: :unique, name: Matrx.RoomRegistry},
+      {Registry, keys: :unique, name: Matrx.SyncRegistry},
       Matrx.RoomSupervisor
       # Starts a worker by calling: Matrx.Worker.start_link(arg)
       # {Matrx.Worker, arg}

@@ -99,6 +99,31 @@ defmodule Matrx.Crypto.RoomMessagesTest do
     assert decrypted.state_key == nil
   end
 
+  test "concurrent decryption of the same event is idempotent", ctx do
+    share_key(ctx)
+    event = encrypted(ctx, text("one event"))
+
+    tasks =
+      for _ <- 1..8 do
+        task =
+          Task.async(fn ->
+            receive do
+              :decrypt -> RoomMessages.decrypt(ctx.bob, @room_id, event)
+            end
+          end)
+
+        Ecto.Adapters.SQL.Sandbox.allow(Repo, self(), task.pid)
+        task
+      end
+
+    for task <- tasks, do: send(task.pid, :decrypt)
+    for task <- tasks, do: assert({:ok, _} = Task.await(task))
+
+    assert Repo.aggregate(Matrx.Megolm.MessageIndex, :count) == 1
+    forged = %{event | event_id: "$different-event"}
+    assert {:error, :replayed} = RoomMessages.decrypt(ctx.bob, @room_id, forged)
+  end
+
   test "decrypts messages in any order", ctx do
     share_key(ctx)
     events = for i <- 1..3, do: encrypted(ctx, text("message #{i}"))

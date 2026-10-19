@@ -463,6 +463,40 @@ defmodule Matrx.API do
   defp sync_timeout(nil), do: :timer.seconds(5)
   defp sync_timeout(timeout), do: timeout + :timer.seconds(5)
 
+  @doc "Fetch a user's profile, including string-keyed displayname and avatar_url fields."
+  @impl Matrx.APIBehaviour
+  def get_profile(session, user_id) do
+    case request(:get, profile_url(session, user_id), headers: headers(session)) do
+      {:ok, %{status: 200, body: body}} -> {:ok, body}
+      {:ok, %{body: body}} -> {:error, Matrx.APIError.from_json(body)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc "Set the logged-in user's display name. An empty string clears it."
+  @impl Matrx.APIBehaviour
+  def set_display_name(session, name), do: put_profile(session, "displayname", name)
+
+  @doc "Set the logged-in user's avatar to an mxc:// URI. An empty string clears it."
+  @impl Matrx.APIBehaviour
+  def set_avatar_url(session, uri), do: put_profile(session, "avatar_url", uri)
+
+  defp put_profile(session, field, value) do
+    case request(:put, profile_url(session, session.user_id, [field]),
+           headers: headers(session),
+           json: %{field => value}
+         ) do
+      {:ok, %{status: 200}} -> :ok
+      {:ok, %{body: body}} -> {:error, Matrx.APIError.from_json(body)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp profile_url(session, user_id, suffix \\ []) do
+    encoded_user = URI.encode(user_id, &URI.char_unreserved?/1)
+    url(session, ["_matrix", "client", "v3", "profile", encoded_user] ++ suffix)
+  end
+
   defp request(method, url, opts) do
     config = Application.get_env(:matrx, __MODULE__, [])
 

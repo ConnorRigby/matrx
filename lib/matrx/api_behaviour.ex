@@ -94,7 +94,13 @@ defmodule Matrx.APIBehaviour do
   @type content :: %{optional(String.t()) => term()}
 
   @typedoc "`since` and `timeout` (milliseconds) of a sync request. Nil is an initial sync."
-  @type sync_query :: nil | %{optional(:since) => String.t(), optional(:timeout) => integer()}
+  @type sync_query ::
+          nil
+          | %{
+              optional(:since) => String.t(),
+              optional(:timeout) => integer(),
+              optional(:full_state) => boolean()
+            }
 
   @typedoc """
   The body of `/sendToDevice`: `\"messages\"` is `{user_id => {device_id => content}}`.
@@ -192,4 +198,15 @@ defmodule Matrx.APIBehaviour do
 
   @callback sync(session, sync_query) ::
               {:ok, Sync.t()} | standard_api_error() | transport_error()
+
+  @type profile :: %{
+          optional(String.t()) => term()
+        }
+
+  @callback get_profile(session, user_id) ::
+              {:ok, profile()} | standard_api_error() | transport_error()
+  @callback set_display_name(session, String.t()) ::
+              :ok | standard_api_error() | transport_error()
+  @callback set_avatar_url(session, String.t()) ::
+              :ok | standard_api_error() | transport_error()
 end
