@@ -62,6 +62,10 @@ defmodule Matrx.APIRetryTest do
     }
 
     calls = [
+      {fn -> API.get_presence(@session, "@bot:example") end, %{"presence" => "online"}},
+      {fn ->
+         API.set_presence(Map.put(@session, :user_id, "@bot:example"), %{"presence" => "online"})
+       end, %{}},
       {fn -> API.get_profile(@session, "@bot:example") end, %{"displayname" => "Bot"}},
       {fn -> API.set_display_name(Map.put(@session, :user_id, "@bot:example"), "Bot") end, %{}},
       {fn ->
@@ -130,6 +134,38 @@ defmodule Matrx.APIRetryTest do
 
     stub([response(403, %{"errcode" => "M_FORBIDDEN", "error" => "Denied"})])
     assert {:error, %APIError{errcode: :m_forbidden}} = API.set_display_name(session, "Bot")
+  end
+
+  test "presence uses authenticated requests with encoded user IDs and correct payloads" do
+    session = Map.put(@session, :user_id, "@bot/a:example")
+    body = %{"presence" => "online", "currently_active" => false, "last_active_ago" => 20}
+    stub([response(200, body)])
+    assert {:ok, ^body} = API.get_presence(session, session.user_id)
+    assert_receive {:attempt, 1, _, get}
+    assert get.method == :get
+    assert get.url.path == "/_matrix/client/v3/presence/%40bot%2Fa%3Aexample/status"
+    assert Req.Request.get_header(get, "authorization") == ["Bearer " <> session.access_token]
+
+    payload = %{"presence" => "unavailable", "status_msg" => ""}
+    stub([response(200, %{})])
+    assert :ok = API.set_presence(session, payload)
+    assert_receive {:attempt, 1, _, put}
+    assert put.method == :put
+    assert put.url == get.url
+    assert :json.decode(IO.iodata_to_binary(put.body)) == payload
+    assert Req.Request.get_header(put, "authorization") == ["Bearer " <> session.access_token]
+
+    for call <- [
+          fn -> API.get_presence(session, session.user_id) end,
+          fn -> API.set_presence(session, payload) end
+        ] do
+      stub([response(403, %{"errcode" => "M_FORBIDDEN", "error" => "Denied"})])
+      assert {:error, %APIError{errcode: :m_forbidden}} = call.()
+      assert_receive {:attempt, 1, _, _}
+
+      stub([%Req.TransportError{reason: :econnrefused}])
+      assert {:error, %Req.TransportError{reason: :econnrefused}} = call.()
+    end
   end
 
   test "Retry-After takes precedence over the Matrix delay" do

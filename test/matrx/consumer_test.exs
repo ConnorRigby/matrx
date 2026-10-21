@@ -6,7 +6,7 @@ defmodule Matrx.ConsumerTest do
   alias Matrx.API.Event
   alias Matrx.Consumer.Context
   alias Matrx.Support.FakeAPI
-  alias Matrx.{Consumer, Message, Session, SyncLongPoll}
+  alias Matrx.{Consumer, Message, Presence, Session, SyncLongPoll}
 
   defmodule Handler do
     @behaviour Matrx.Consumer
@@ -99,6 +99,79 @@ defmodule Matrx.ConsumerTest do
   end
 
   describe "the consumer process" do
+    test "delivers initial presence only to its session, including own presence", ctx do
+      consumer = start_supervised!({Consumer, handler: Handler, session: ctx.bob})
+      other = %{ctx.bob | id: Ecto.UUID.generate(), user_id: "@other:x"}
+
+      start_supervised!(
+        Supervisor.child_spec(
+          {Consumer, handler: Handler, session: other},
+          id: :other_consumer
+        )
+      )
+
+      start_supervised!({SyncLongPoll, [session: ctx.bob, api: FakeAPI, initial_history: false]})
+
+      user_id = ctx.bob.user_id
+      session_id = ctx.bob.id
+
+      FakeAPI.push_sync(ctx.feed, %{
+        "next_batch" => "presence1",
+        "presence" => %{
+          "events" => [
+            %{
+              "type" => "m.presence",
+              "sender" => user_id,
+              "content" => %{"presence" => "online", "currently_active" => true}
+            }
+          ]
+        }
+      })
+
+      assert_receive {:handled,
+                      {:presence_update,
+                       %Presence{user_id: ^user_id, presence: :online} = presence,
+                       %Context{session: %Session{id: ^session_id}}}},
+                     2000
+
+      assert {:ok, ^presence} = Presence.get_cached(ctx.bob, user_id)
+      assert :error = Presence.get_cached(other, user_id)
+      refute_receive {:handled, {:presence_update, _, _}}
+
+      stop_supervised!(SyncLongPoll)
+      start_supervised!({SyncLongPoll, [session: ctx.bob, api: FakeAPI]})
+      assert {:ok, ^presence} = Presence.get_cached(ctx.bob, user_id)
+
+      stop_supervised!(Consumer)
+      refute Process.alive?(consumer)
+      start_supervised!({Consumer, handler: Handler, session: ctx.bob})
+      assert {:ok, ^presence} = Presence.get_cached(ctx.bob, user_id)
+
+      FakeAPI.push_sync(ctx.feed, %{
+        "next_batch" => "presence2",
+        "presence" => %{
+          "events" => [
+            %{
+              "type" => "m.presence",
+              "sender" => "@alice:x",
+              "content" => %{"presence" => "unavailable", "last_active_ago" => 1200}
+            }
+          ]
+        }
+      })
+
+      assert_receive {:handled,
+                      {:presence_update,
+                       %Presence{
+                         user_id: "@alice:x",
+                         presence: :unavailable,
+                         last_active_ago: 1200
+                       }, %Context{session: %Session{id: ^session_id}}}},
+                     2000
+
+      refute_receive {:handled, {:presence_update, _, _}}
+    end
+
     test "refuses a module that is not a handler", ctx do
       Process.flag(:trap_exit, true)
 

@@ -11,6 +11,7 @@ defmodule Matrx.Application do
       {Phoenix.PubSub, name: Matrx.PubSub},
       Matrx.Repo,
       {Task.Supervisor, name: Matrx.TaskSupervisor},
+      Matrx.Presence,
       {Registry, keys: :unique, name: Matrx.RoomRegistry},
       {Registry, keys: :unique, name: Matrx.SyncRegistry},
       Matrx.RoomSupervisor

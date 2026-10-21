@@ -42,7 +42,8 @@ defmodule Matrx.Support.FakeAPI do
            signing_keys: %{},
            uia_password: nil,
            failures: %{},
-           profiles: %{}
+           profiles: %{},
+           presences: %{}
          }}
 
     @impl true
@@ -128,6 +129,16 @@ defmodule Matrx.Support.FakeAPI do
 
     def handle_call({:get_profile, user_id}, _from, state) do
       {:reply, {:ok, Map.get(state.profiles, user_id, %{})}, state}
+    end
+
+    def handle_call({:get_presence, user_id}, _from, state) do
+      {:reply, {:ok, Map.get(state.presences, user_id, %{"presence" => "offline"})}, state}
+    end
+
+    def handle_call({:set_presence, user_id, payload}, _from, state) do
+      presence = Map.merge(Map.get(state.presences, user_id, %{}), payload)
+      send(state.owner, {:set_presence, user_id, payload})
+      {:reply, :ok, %{state | presences: Map.put(state.presences, user_id, presence)}}
     end
 
     def handle_call({:put_profile, user_id, field, value}, _from, state) do
@@ -424,6 +435,14 @@ defmodule Matrx.Support.FakeAPI do
   @impl Matrx.APIBehaviour
   def set_avatar_url(session, uri),
     do: GenServer.call(feed(session), {:put_profile, session.user_id, "avatar_url", uri})
+
+  @impl Matrx.APIBehaviour
+  def get_presence(session, user_id),
+    do: GenServer.call(feed(session), {:get_presence, user_id})
+
+  @impl Matrx.APIBehaviour
+  def set_presence(session, payload),
+    do: GenServer.call(feed(session), {:set_presence, session.user_id, payload})
 
   defp login(%{home_server_uri: %URI{host: host}}, username, device_id) do
     %{

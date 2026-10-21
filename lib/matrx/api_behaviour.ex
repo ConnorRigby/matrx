@@ -209,4 +209,9 @@ defmodule Matrx.APIBehaviour do
               :ok | standard_api_error() | transport_error()
   @callback set_avatar_url(session, String.t()) ::
               :ok | standard_api_error() | transport_error()
+
+  @callback get_presence(session, user_id) ::
+              {:ok, map()} | standard_api_error() | transport_error()
+  @callback set_presence(session, payload :: map()) ::
+              :ok | standard_api_error() | transport_error()
 end

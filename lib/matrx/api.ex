@@ -497,6 +497,34 @@ defmodule Matrx.API do
     url(session, ["_matrix", "client", "v3", "profile", encoded_user] ++ suffix)
   end
 
+  @doc "Fetch a user's presence as a string-keyed content map."
+  @impl Matrx.APIBehaviour
+  def get_presence(session, user_id) do
+    case request(:get, presence_url(session, user_id), headers: headers(session)) do
+      {:ok, %{status: 200, body: body}} -> {:ok, body}
+      {:ok, %{body: body}} -> {:error, Matrx.APIError.from_json(body)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc "Set the logged-in user's presence using a string-keyed payload."
+  @impl Matrx.APIBehaviour
+  def set_presence(session, payload) do
+    case request(:put, presence_url(session, session.user_id),
+           headers: headers(session),
+           json: payload
+         ) do
+      {:ok, %{status: 200}} -> :ok
+      {:ok, %{body: body}} -> {:error, Matrx.APIError.from_json(body)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp presence_url(session, user_id) do
+    encoded_user = URI.encode(user_id, &URI.char_unreserved?/1)
+    url(session, ["_matrix", "client", "v3", "presence", encoded_user, "status"])
+  end
+
   defp request(method, url, opts) do
     config = Application.get_env(:matrx, __MODULE__, [])
 

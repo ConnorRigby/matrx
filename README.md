@@ -5,6 +5,7 @@ Elixir library implementing a basic [Matrix](https://matrix.org/) client. It sup
 * End to end encryption, verification and cross signing
 * Sending and receiving plaintext and end to end encrypted messages. Text and Media upload is supported
 * Room membership: join, leave, kick, ban
+* Presence updates: messages and fetching/setting presence
 
 ## Installation
 
@@ -116,6 +117,33 @@ execution: a crash between recording an event and completing its handler can
 lose that delivery. Handlers needing stronger guarantees should durably queue
 and acknowledge their own messages. Sync checkpoints are saved after batch
 processing, and held back while room keys are missing.
+
+### Presence
+
+Consumers presence messages through the same callback:
+
+```elixir
+def handle_event({:presence_update, presence, ctx}) do
+  IO.inspect({presence.user_id, presence.presence, presence.status_msg})
+  # The cache is already updated when the handler runs:
+  {:ok, latest} = Matrx.Presence.get_cached(ctx.session, presence.user_id)
+  IO.inspect(latest)
+end
+```
+
+Presence is scoped to the syncing session, includes your own user regardless
+of `ignore_own`, and is delivered on initial sync even with
+`initial_history: false`. Each observation replaces that user's cached value.
+`get_cached/2` returns `{:ok, presence}` or `:error` for unknown users, not an
+assumed offline status. The in-memory cache survives consumer and sync restarts,
+but is cleared on application restart.
+
+```elixir
+{:ok, presence} = Matrx.Presence.fetch(session, "@alice:example.org")
+:ok = Matrx.Presence.set(session, :online, status_msg: "Ready")
+:ok = Matrx.Presence.set(session, :unavailable)
+:ok = Matrx.Presence.set(session, :offline, status_msg: "")
+```
 
 ## Getting Help
 

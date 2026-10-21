@@ -176,7 +176,7 @@ defmodule Matrx.SyncLongPoll do
   end
 
   def handle_continue([{:sync_presence, [event | rest]} | next], state) do
-    :ok = Presence.sync(event)
+    :ok = Presence.sync(state.session, event)
     {:noreply, state, {:continue, [{:sync_presence, rest} | next]}}
   end
 

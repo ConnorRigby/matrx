@@ -40,6 +40,9 @@ defmodule Matrx.Consumer do
     * `{:room_invite, %Matrx.Invite{}, ctx}`: the user was invited to a room.
       Accept it with `Matrx.Invite.accept/3`, or set `:auto_join`, below.
       Invites that were still open when the client started are delivered too.
+    * `{:presence_update, %Matrx.Presence{}, ctx}`: a presence observation from
+      this session's sync, including your own user. The session's presence cache
+      is updated before delivery. Unlike room events, these are session-scoped.
     * `{:event, %{room_id: room_id, event: %Matrx.API.Event{}}, ctx}`: any other
       non-state event, as received.
 
@@ -58,7 +61,7 @@ defmodule Matrx.Consumer do
   use GenServer
   require Logger
   alias Matrx.API.Event
-  alias Matrx.{Invite, Message, Room}
+  alias Matrx.{Invite, Message, Presence, Room}
 
   defmodule Context do
     @moduledoc "Passed with every event: the session the consumer runs for"
@@ -72,6 +75,7 @@ defmodule Matrx.Consumer do
           {:message_create, Message.t(), context()}
           | {:message_undecryptable, Message.t(), context()}
           | {:room_invite, Invite.t(), context()}
+          | {:presence_update, Presence.t(), context()}
           | {:event, %{room_id: String.t(), event: Event.t()}, context()}
 
   @callback handle_event(event()) :: any()
@@ -134,6 +138,7 @@ defmodule Matrx.Consumer do
     with {:module, _} <- Code.ensure_loaded(handler),
          true <- function_exported?(handler, :handle_event, 1) do
       :ok = Phoenix.PubSub.subscribe(Matrx.PubSub, Room.events_topic())
+      :ok = Phoenix.PubSub.subscribe(Matrx.PubSub, Presence.topic(session))
 
       {:ok,
        %{
@@ -169,6 +174,11 @@ defmodule Matrx.Consumer do
       auto_join(state, invite)
     end
 
+    {:noreply, state}
+  end
+
+  def handle_info({:presence_update, %Presence{} = presence}, state) do
+    run(state, {:presence_update, presence, state.ctx})
     {:noreply, state}
   end
 
